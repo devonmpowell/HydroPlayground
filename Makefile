@@ -23,8 +23,8 @@ endif
 include $(MAKEFILE_IN)
 
 # Source files
-SOURCES = driver.c 
-COMMON = 
+SOURCES = driver.c eos.c
+COMMON = common.h eos.h 
 OBJ = $(SOURCES:.c=.o)
 EXE = d_euler_hydro
 

@@ -13,36 +13,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-/*#include "hdf5.h"*/
 
-typedef float real;
+#include "common.h"
+#include "eos.h"
 
-// conserved hydro quantities
-int nzones;
-real eos_gamma;
-real t;
+// global information
 real L;
+int nzones;
+int boundary;
+real time;
 
 // conserved variables and fluxes
-// plus macros for access
-#define RHO 0
-#define MOMX 1 
-#define MOMY 2 
-#define MOMZ 3 
-#define ENERGY 4
 real* U[5];
-real* F[5];
+real* U_old[5];
 
-// macros for getting zone indices from the face index
-#define NGHOST 1 // num boundary ghosts
-#define ZL(i) ((i)+NGHOST-1)
-#define ZR(i) ((i)+NGHOST)
-#define LEFT (NGHOST-1)
-#define RIGHT (NGHOST)
-
-int boundary;
-#define BC_WALL 0
-#define BC_PERIODIC 1
+// equation of state functions
+real eos_gamma;
+real (*eos_p)(real, real, real);
 
 // forward definitions
 void init();
@@ -72,19 +59,22 @@ void evolve() {
 	real c[2*NGHOST]; // sound speed
 	real alpha[2*NGHOST]; // left and right wave speeds
 
+	// fluxes to compute
+	real F[5];
+
 	// max characteristic speed
+	real cfl_fac = 0.5;
+	real vcell;
+	real ccell;
 	real alpha_max;
 
 	dt = 0.01;
-	t = 0.0;
+	time = 0.0;
 	tmax = 0.2;
 	step = 0;
 
 
-	while(t < tmax) {
-
-		// max characteristic speed on the grid
-		alpha_max = 0.0;
+	while(time < tmax) {
 
 		// copy BCs to ghost zones
 		if(boundary == BC_WALL) for(i = 0; i < NGHOST; ++i) {
@@ -104,22 +94,39 @@ void evolve() {
 			U[ENERGY][ZR(nzones+i)] = U[ENERGY][ZR(i)];
 		}
 
+		// get the max. characteristic speed on the grid
+		alpha_max = 0.0;
+		for(i = 0; i < nzones; ++i) {
+			vcell = U[MOMX][ZR(i)]/U[RHO][ZR(i)];
+			ccell = sqrt(eos_gamma*eos_p(U[RHO][ZR(i)], 
+					U[ENERGY][ZR(i)]/U[RHO][ZR(i)] - 0.5*vcell*vcell, eos_gamma)/U[RHO][ZR(i)]);
+			if(fabs(vcell + ccell) > alpha_max) alpha_max = fabs(vcell + ccell);
+			if(fabs(vcell - ccell) > alpha_max) alpha_max = fabs(vcell - ccell);
+		}
+
+		// copy state vector U to a back-buffer
+		for(i = 0; i < 5; ++i)
+			if(U[i]) memcpy((void*) U_old[i], (void*) U[i], (nzones+2*NGHOST)*sizeof(real)); 
+		
+		// time step based on CFL condition
+		dt = cfl_fac*dx/alpha_max;
+		if(step%100 == 0) printf("Step %d, t = %f, dt = %f.\n", step, time, dt);
+
 		// Solve the approximate Riemann problem for fluxes
 		for(i = 0; i <= nzones; ++i) {
 
 			// get local copies of the grid stencil
-			rho[LEFT] = U[RHO][ZL(i)];
-			rho[RIGHT] = U[RHO][ZR(i)];
-			E[LEFT] = U[ENERGY][ZL(i)];
-			E[RIGHT] = U[ENERGY][ZR(i)];
-
-			// solve for local primitives
-			v[LEFT] = U[MOMX][ZL(i)]/U[RHO][ZL(i)];
-			v[RIGHT] = U[MOMX][ZR(i)]/U[RHO][ZR(i)];
-			p[LEFT] = (eos_gamma - 1.0)*(E[LEFT] - 0.5*rho[LEFT]*v[LEFT]*v[LEFT]);
-			p[RIGHT] = (eos_gamma - 1.0)*(E[RIGHT] - 0.5*rho[RIGHT]*v[RIGHT]*v[RIGHT]);
+			// and solve for local primitives
+			rho[LEFT] = U_old[RHO][ZL(i)];
+			rho[RIGHT] = U_old[RHO][ZR(i)];
+			E[LEFT] = U_old[ENERGY][ZL(i)];
+			E[RIGHT] = U_old[ENERGY][ZR(i)];
+			v[LEFT] = U_old[MOMX][ZL(i)]/rho[LEFT];
+			v[RIGHT] = U_old[MOMX][ZR(i)]/rho[RIGHT];
+			p[LEFT] = eos_p(rho[LEFT], (E[LEFT]/rho[LEFT] - 0.5*v[LEFT]*v[LEFT]), eos_gamma);
+			p[RIGHT] = eos_p(rho[RIGHT], (E[RIGHT]/rho[RIGHT] - 0.5*v[RIGHT]*v[RIGHT]), eos_gamma);
 			c[LEFT] = sqrt(eos_gamma*p[LEFT]/rho[LEFT]);
-			c[RIGHT] = sqrt(eos_gamma*p[LEFT]/rho[LEFT]);
+			c[RIGHT] = sqrt(eos_gamma*p[RIGHT]/rho[RIGHT]);
 
 			// get characteristic speeds
 			alpha[LEFT] = 0.0; // left wave speed
@@ -129,81 +136,75 @@ void evolve() {
 			if(v[RIGHT] + c[RIGHT] > alpha[RIGHT]) alpha[RIGHT] = v[RIGHT] + c[RIGHT];
 			if(v[LEFT] + c[LEFT] > alpha[RIGHT]) alpha[RIGHT] = v[LEFT] + c[LEFT];
 
-			// save max characteristic speed for CFL
-			if(-alpha[LEFT] > alpha_max) alpha_max = -alpha[LEFT];
-			if(alpha[RIGHT] > alpha_max) alpha_max = alpha[RIGHT];
-
 			// HLL fluxes
-			F[RHO][i] = (alpha[RIGHT]*rho[LEFT]*v[LEFT] - alpha[LEFT]*rho[RIGHT]*v[RIGHT] 
+			F[RHO] = (alpha[RIGHT]*rho[LEFT]*v[LEFT] - alpha[LEFT]*rho[RIGHT]*v[RIGHT] 
 					+ alpha[LEFT]*alpha[RIGHT]*(rho[RIGHT] - rho[LEFT]))/(alpha[RIGHT] - alpha[LEFT]); 
-			F[MOMX][i] = (alpha[RIGHT]*(rho[LEFT]*v[LEFT]*v[LEFT] + p[LEFT]) - alpha[LEFT]*(rho[RIGHT]*v[RIGHT]*v[RIGHT] + p[RIGHT]) 
+			F[MOMX] = (alpha[RIGHT]*(rho[LEFT]*v[LEFT]*v[LEFT] + p[LEFT]) - alpha[LEFT]*(rho[RIGHT]*v[RIGHT]*v[RIGHT] + p[RIGHT]) 
 					+ alpha[LEFT]*alpha[RIGHT]*(rho[RIGHT]*v[RIGHT] - rho[LEFT]*v[LEFT]))/(alpha[RIGHT] - alpha[LEFT]); 
-			F[ENERGY][i] = (alpha[RIGHT]*(E[LEFT] + p[LEFT])*v[LEFT] - alpha[LEFT]*(E[RIGHT] + p[RIGHT])*v[RIGHT] 
+			F[ENERGY] = (alpha[RIGHT]*(E[LEFT] + p[LEFT])*v[LEFT] - alpha[LEFT]*(E[RIGHT] + p[RIGHT])*v[RIGHT] 
 					+ alpha[LEFT]*alpha[RIGHT]*(E[RIGHT] - E[LEFT]))/(alpha[RIGHT] - alpha[LEFT]); 
+			
+			// update state vectors
+			// forward Euler
+			U[RHO][ZL(i)] -= dt/dx*F[RHO];
+			U[RHO][ZR(i)] += dt/dx*F[RHO];
+			U[MOMX][ZL(i)] -= dt/dx*F[MOMX];
+			U[MOMX][ZR(i)] += dt/dx*F[MOMX];
+			U[ENERGY][ZL(i)] -= dt/dx*F[ENERGY];
+			U[ENERGY][ZR(i)] += dt/dx*F[ENERGY];
 
-		}
-
-		// CFL condition
-		dt = 0.8*dx/alpha_max;
-		if(step%100 == 0) printf("Step %d, t = %f, dt = %f.\n", step, t, dt);
-
-		// update conserved quantities
-		// forward Euler
-		for(i = 0; i <= nzones; ++i) {
-			U[RHO][ZL(i)] -= dt/dx*F[RHO][i];
-			U[RHO][ZR(i)] += dt/dx*F[RHO][i];
-			U[MOMX][ZL(i)] -= dt/dx*F[MOMX][i];
-			U[MOMX][ZR(i)] += dt/dx*F[MOMX][i];
-			U[ENERGY][ZL(i)] -= dt/dx*F[ENERGY][i];
-			U[ENERGY][ZR(i)] += dt/dx*F[ENERGY][i];
 		}
 
 		step++;
-		t += dt;
+		time += dt;
 	}
-	printf("Done: %d steps, t = %f.\n", step, t);
+	printf("Done: %d steps, t = %f.\n", step, time);
 }
 
 void init() {
 
+	int i;
+
+	// grid allocation
 	nzones = 256;
 	L = 1.0;
 	U[RHO] = (real*) malloc((nzones+2*NGHOST)*sizeof(real));
 	U[MOMX] = (real*) malloc((nzones+2*NGHOST)*sizeof(real));
 	U[ENERGY] = (real*) malloc((nzones+2*NGHOST)*sizeof(real));
-	F[RHO] = (real*) malloc((nzones+1)*sizeof(real));
-	F[MOMX] = (real*) malloc((nzones+1)*sizeof(real));
-	F[ENERGY] = (real*) malloc((nzones+1)*sizeof(real));
+	U_old[RHO] = (real*) malloc((nzones+2*NGHOST)*sizeof(real));
+	U_old[MOMX] = (real*) malloc((nzones+2*NGHOST)*sizeof(real));
+	U_old[ENERGY] = (real*) malloc((nzones+2*NGHOST)*sizeof(real));
 
-	int i;
+	// equation of state
+	eos_gamma = EOS_SEVEN_FIFTHS;
+	eos_p = eos_ideal_p;
+
 #if 1
 	boundary = BC_WALL;
 	real rho_left = 1.0;
 	real p_left = 1.0;
 	real rho_right = 0.125;
 	real p_right = 0.1;
-	eos_gamma = 1.4;
-	for(i = NGHOST; i < NGHOST + nzones/2; ++i) {
-		U[RHO][i] = rho_left; 
-		U[MOMX][i] = 0.0;
-		U[ENERGY][i] = p_left/(eos_gamma-1.0);
+	for(i = 0; i < nzones/2; ++i) {
+		U[RHO][ZR(i)] = rho_left; 
+		U[MOMX][ZR(i)] = 0.0;
+		U[ENERGY][ZR(i)] = p_left/(eos_gamma-1.0);
 	}
-	for(i = NGHOST + nzones/2; i < NGHOST + nzones; ++i) {
-		U[RHO][i] = rho_right; 
-		U[MOMX][i] = 0.0;
-		U[ENERGY][i] = p_right/(eos_gamma-1.0);
+	for(i = nzones/2; i < nzones; ++i) {
+		U[RHO][ZR(i)] = rho_right; 
+		U[MOMX][ZR(i)] = 0.0;
+		U[ENERGY][ZR(i)] = p_right/(eos_gamma-1.0);
 	}
 #else
 	// advection test
 	boundary = BC_PERIODIC;
-	eos_gamma = 1.4;
 	real pressure = 1.0;
 	real v = 1.0;
-	for(i = NGHOST; i < NGHOST + nzones; ++i) {
-		U[RHO][i] = 1.0; 
-		if(i >= NGHOST + 3*nzones/8 && i < NGHOST + 5*nzones/8) U[RHO][i] = 2.0;
-		U[MOMX][i] = v*U[RHO][i];
-		U[ENERGY][i] = pressure/(eos_gamma-1.0) + 1.0/(2.0*U[RHO][i])*U[MOMX][i]*U[MOMX][i];
+	for(i = 0; i < nzones; ++i) {
+		U[RHO][ZR(i)] = 1.0; 
+		if(i >= 3*nzones/8 && i < 5*nzones/8) U[RHO][ZR(i)] *= 2.0;
+		U[MOMX][ZR(i)] = v*U[RHO][ZR(i)];
+		U[ENERGY][ZR(i)] = pressure/(eos_gamma-1.0) + 1.0/(2.0*U[RHO][ZR(i)])*U[MOMX][ZR(i)]*U[MOMX][ZR(i)];
 	}
 #endif
 
@@ -214,7 +215,7 @@ void release() {
 	int i;
 	for(i = 0; i < 5; ++i) {
 		if(U[i]) free(U[i]);
-		if(F[i]) free(F[i]);
+		if(U_old[i]) free(U_old[i]);
 	}
 }
 
@@ -233,7 +234,7 @@ void write(char* filename) {
 
 	// write hydro quantities
 	fwrite(&eos_gamma, sizeof(real), 1, output);
-	fwrite(&t, sizeof(real), 1, output);
+	fwrite(&time, sizeof(real), 1, output);
 	fwrite(U[RHO]+NGHOST, sizeof(real), nzones, output);
 	fwrite(U[MOMX]+NGHOST, sizeof(real), nzones, output);
 	fwrite(U[ENERGY]+NGHOST, sizeof(real), nzones, output);
