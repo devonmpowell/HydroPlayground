@@ -29,6 +29,7 @@ OBJ = $(SOURCES:.c=.o)
 EXE = d_euler_hydro
 
 LDFLAGS += -lm
+CFLAGS += -O3 -Wall
 
 # Set up HDF5 dependencies
 #INC += -I$(HDF5_HOME)/include
