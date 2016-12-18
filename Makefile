@@ -1,40 +1,25 @@
 # ---------------------------------------------------------------------------
 #
-#	Makefile for d_euler_hydro
+#	Makefile for HydroPlayground 
 #
 #	Devon Powell 
-#	(with some useful bits from Jonathan Zrake)
-#
-#	Do not modify this file!
-#	All user-set options live in Makefile.in
+#	December 2016
 #
 #	usage: make
 #
 # ---------------------------------------------------------------------------
 
-# if there is no Makefile.in then use the template
-ifneq ($(strip $(MAKEFILE_IN)),)
-# use value of MAKEFILE_IN if provided on the command line
-else ifeq ($(shell test -e Makefile.in && echo 1), 1)
-MAKEFILE_IN = Makefile.in
-else
-MAKEFILE_IN = Makefile.in.template
-endif
-include $(MAKEFILE_IN)
 
 # Source files
 SOURCES = driver.c eos.c
 COMMON = common.h eos.h 
 OBJ = $(SOURCES:.c=.o)
-EXE = d_euler_hydro
+LIBOUT = lib/hydroplay.so 
 
+# compiler options
+CC = gcc
+CFLAGS = -shared -fPIC -O3 -Wall
 LDFLAGS += -lm
-CFLAGS += -O3 -Wall
-
-# Set up HDF5 dependencies
-#INC += -I$(HDF5_HOME)/include
-#LIB += -L$(HDF5_HOME)/lib
-#LDFLAGS += -lhdf5
 
 # enable MPI?
 #ifeq ($(strip $(USE_MPI)), 1)
@@ -42,13 +27,17 @@ CFLAGS += -O3 -Wall
 #CC = mpicc
 #endif
 
-all: $(EXE)
+all: $(LIBOUT)
 
-$(EXE): $(COMMON) $(OBJ) 
-	$(CC) $(LIB) $(OBJ) -o $@ $(LDFLAGS)
+$(LIBOUT): $(COMMON) $(OBJ) dirs 
+	$(CC) $(OBJ) -o $@ $(LDFLAGS) $(CFLAGS)
 
 .c.o: $(COMMON)
-	$(CC) $(INC) $(DEF) $(CFLAGS) $(OPT) -c $< -o $@
+	$(CC) -c -o $@ $(INC) $(CFLAGS) $<
+
+dirs:
+	@- if ! test -e obj; then mkdir obj; fi
+	@- if ! test -e lib; then mkdir lib; fi
 
 clean:
 	rm -f $(OBJ) *~ core $(EXE)
