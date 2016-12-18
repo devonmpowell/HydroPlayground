@@ -33,6 +33,93 @@ def _default_init(self):
     grid['rho'][hg:] = 0.125
     grid['mom'][hg:] = 0.0
     grid['etot'][hg:] = 0.01/(0.125*(self.eos_gamma-1)) 
+
+# default plot-maker
+def _default_plots(self, fsz=8):
+    plgrid = self.getGrid()
+    rho = plgrid['rho']
+    mom = plgrid['mom']
+    if self.dim == 3: # TODO: something more elegant here...
+        vel = mom[:,:,:,0]/rho
+    if self.dim == 2: # TODO: something more elegant here...
+        vel = mom[:,:,0]/rho
+    elif self.dim == 1:
+        vel = mom[:,0]/rho
+    etot = plgrid['etot']
+    p = (self.eos_gamma-1.0)*(etot-0.5*rho*vel**2)
+    if self.dim == 1:
+        #if hasattr(self, 'fig'):
+            #ax = self.fig.get_axes()
+        #else:
+        self.fig, ax = plt.subplots(3, 1, figsize=(fsz, fsz), sharex=True)
+        x = (0.5+np.arange(self.nx[0]))*self.dx
+
+        ax[0].plot(x, rho)
+        ax[0].set_ylabel(r'$\rho$')
+        ax[0].set_ylim(0.0, 1.2*np.max(rho))
+
+        ax[1].plot(x, vel)
+        ax[1].set_ylabel('$v$')
+        ax[1].set_ylim(min(-1.0, 1.2*np.min(vel)), max(1.0, 1.2*np.max(vel)))
+
+        ax[2].plot(x, p)
+        ax[2].set_ylabel('$p$')
+        ax[2].set_ylim(0.0, 1.2*np.max(p))
+
+    if self.dim == 2:
+        imargs = {'interpolation': 'nearest', 'origin': 'lower'}
+
+        #if hasattr(self, 'fig'):
+            #ax = self.fig.get_axes()
+        #else:
+        self.fig, ax = plt.subplots(1, 3, figsize=(3*fsz, fsz))
+
+        ax[0].imshow(rho, **imargs)
+        ax[0].set_ylabel(r'$y$')
+        ax[0].set_xlabel(r'$x$')
+        ax[0].set_title('rho')
+
+        ax[1].imshow(vel, **imargs)
+        ax[1].set_ylabel(r'$y$')
+        ax[1].set_xlabel(r'$x$')
+        ax[1].set_title('vel')
+
+        ax[2].imshow(p, **imargs)
+        ax[2].set_ylabel(r'$y$')
+        ax[2].set_xlabel(r'$x$')
+        ax[2].set_title('pressure')
+
+    if self.dim == 3:
+        imargs = {'interpolation': 'nearest', 'origin': 'lower'}
+
+        #if hasattr(self, 'fig'):
+            #ax = self.fig.get_axes()
+        #else:
+        self.fig, ax = plt.subplots(1, 3, figsize=(3*fsz, fsz))
+
+        ax[0].imshow(rho[:,:,32], **imargs)
+        ax[0].set_ylabel(r'$y$')
+        ax[0].set_xlabel(r'$x$')
+        ax[0].set_title('rho')
+
+        ax[1].imshow(vel[:,:,32], **imargs)
+        ax[1].set_ylabel(r'$y$')
+        ax[1].set_xlabel(r'$x$')
+        ax[1].set_title('vel')
+
+        ax[2].imshow(p[:,:,32], **imargs)
+        ax[2].set_ylabel(r'$y$')
+        ax[2].set_xlabel(r'$x$')
+        ax[2].set_title('pressure')
+
+
+
+    ax[-1].set_xlabel(r'$x$')
+    self.fig.suptitle('%s, step = %d, t = %.03f' % (self.name, self.step, self.time))
+    plt.show()
+
+# parameters for a 1D problem with 256 grid cells
+# this defines every parameter that HydroPlayground recognizes
 _default_params = {
         'name': 'default_hp_problem',
         'dim': 1,
@@ -42,6 +129,7 @@ _default_params = {
         'bctype': 'wall',
         'dx': 1.0/256,
         'init_grid': _default_init, 
+        'output': _default_plots, 
 }
 
 class HydroProblem(Structure):
@@ -67,7 +155,7 @@ class HydroProblem(Structure):
         if self.verbose:
             print "\nLoading parameters..."
         cfields = [f[0] for f in self._fields_]
-        bctypes = {'wall': 0, 'periodic': 1}
+        bctypes = {'wall': 0, 'periodic': 1, 'free': 2}
         for dp, val in _default_params.iteritems():
             if dp in params_dict:
                val = params_dict[dp]
@@ -86,6 +174,7 @@ class HydroProblem(Structure):
         self.nghosts = 1 
         self.dtype = np.dtype([('rho', np.float64), ('mom', np.float64, (3,)), ('etot', np.float64)]);
         self.pygrid = np.zeros(tuple(axsz+2*self.nghosts for axsz in self.nx[:self.dim]), dtype=self.dtype)
+        print self.pygrid.strides
         tstr = tuple(np.cumprod(np.append(1,self.pygrid.shape))[:self.dim])
         self.strides = tstr
         if self.verbose:
@@ -99,8 +188,8 @@ class HydroProblem(Structure):
             print " Success!"
 
         # kick it off!
-        self.wallstart = time.time()
         self.step = 0
+        self.wallstart = time.time()
 
         # do C things like find grid strides, etc
         # TODO: figure out how to reference C function pointers!
@@ -115,6 +204,9 @@ class HydroProblem(Structure):
             print "------------------------------"
 
     def run(self, tstop=0.2, max_steps=1000, output_every=10, output_callback=None):
+        if self.step >= max_steps:
+            print '\nCannot run while step >= max_steps. Reset me!'
+            return
         if self.verbose:
             print "\nRunning..."
             print " - tstop =", tstop
@@ -124,9 +216,12 @@ class HydroProblem(Structure):
         _hp.evolve(c_double(tstop), max_steps, output_every, byref(self))
         tstop = time.time()
         if self.verbose:
-            print " - done. Delta t = %.03f s (total elapsed = %.03f s)" % (tstop-tstart, tstop-self.wallstart)
+            print " - wall time = %.03f s (total elapsed = %.03f s)" % (tstop-tstart, tstop-self.wallstart)
+        self.output(self)
 
     def getGrid(self):
+        if self.dim == 3:
+            return self.pygrid[self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]
         if self.dim == 2:
             return self.pygrid[self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]
         if self.dim == 1:
@@ -134,69 +229,6 @@ class HydroProblem(Structure):
 
     def write(self):
         # TODO: figure out how to do output callbacks!!!
+        # TODO: do the output dumps all in Python??
     	_psi.write(byref(self))
-
-    def plots(self, fsz=8):
-        plgrid = self.getGrid()
-        rho = plgrid['rho']
-        mom = plgrid['mom']
-        if self.dim == 2: # TODO: something more elegant here...
-            vel = mom[:,:,0]/rho
-        elif self.dim == 1:
-            vel = mom[:,0]/rho
-        etot = plgrid['etot']
-        p = (self.eos_gamma-1.0)*(etot-0.5*rho*vel**2)
-        if self.dim == 1:
-            #if hasattr(self, 'fig'):
-                #ax = self.fig.get_axes()
-            #else:
-            self.fig, ax = plt.subplots(3, 1, figsize=(fsz, fsz), sharex=True)
-            x = (0.5+np.arange(self.nx[0]))*self.dx
-
-            ax[0].plot(x, rho)
-            ax[0].set_ylabel(r'$\rho$')
-            ax[0].set_ylim(0.0, 1.2*np.max(rho))
-
-            ax[1].plot(x, vel)
-            ax[1].set_ylabel('$v$')
-            ax[1].set_ylim(min(-1.0, 1.2*np.min(vel)), max(1.0, 1.2*np.max(vel)))
-
-            ax[2].plot(x, p)
-            ax[2].set_ylabel('$p$')
-            ax[2].set_ylim(0.0, 1.2*np.max(p))
-
-        if self.dim == 2:
-            imargs = {'interpolation': 'nearest', 'origin': 'lower'}
-
-            #if hasattr(self, 'fig'):
-                #ax = self.fig.get_axes()
-            #else:
-            self.fig, ax = plt.subplots(1, 3, figsize=(3*fsz, fsz))
-
-            ax[0].imshow(rho, **imargs)
-            ax[0].set_ylabel(r'$y$')
-            ax[0].set_xlabel(r'$x$')
-            ax[0].set_title('rho')
-
-            ax[1].imshow(vel, **imargs)
-            ax[1].set_ylabel(r'$y$')
-            ax[1].set_xlabel(r'$x$')
-            ax[1].set_title('vel')
-
-            ax[2].imshow(p, **imargs)
-            ax[2].set_ylabel(r'$y$')
-            ax[2].set_xlabel(r'$x$')
-            ax[2].set_title('pressure')
-
-        ax[-1].set_xlabel(r'$x$')
-        self.fig.suptitle('%s, step = %d, t = %.03f' % (self.name, self.step, self.time))
-        plt.show()
-
-
-#_hp.init.argtypes = (POINTER(HydroProblem),)
-
-
-
-
-
 

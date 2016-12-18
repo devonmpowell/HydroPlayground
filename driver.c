@@ -147,6 +147,11 @@ void update_skewer(dvec skewer, int iterax, real fluxfac, hydro_problem* hp) {
 		state_skewer[ZL(-i)] = state_skewer[ZL(hp->nx[iterax]-i)];
 		state_skewer[ZR(hp->nx[iterax]+i)] = state_skewer[ZR(i)];
 	}
+	else if(hp->bctype == BC_FREE) 
+	for(i = 0; i < STENCIL_SIZE; ++i) {
+		state_skewer[ZL(-i)] = state_skewer[ZR(i)];
+		state_skewer[ZR(hp->nx[iterax]+i)] = state_skewer[ZL(hp->nx[iterax]-i)];
+	}
 	
 	// we have skewer primitives in hand, now solve for fluxes and step forward in time 
 	// forward Euler
@@ -154,6 +159,11 @@ void update_skewer(dvec skewer, int iterax, real fluxfac, hydro_problem* hp) {
 	for(i = 0; i <= hp->nx[iterax]; ++i) {
 		// solve the Riemann problem
 		flux = flux_solve_hll(state_skewer[ZL(i)], state_skewer[ZR(i)], iterax, hp);
+
+		// trying to do higher-order interpolation by keeping x-moments around...
+		for(ax = 0; ax < hp->dim; ++ax) {
+			skewer[(iterax+ax)%hp->dim] ;
+		}
 
 		// update both grid cells
 		skewer[iterax] = i-1;

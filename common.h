@@ -23,12 +23,11 @@
 #define STENCIL_SIZE 1 // num boundary ghosts
 #define ZL(i) ((i)+STENCIL_SIZE-1)
 #define ZR(i) ((i)+STENCIL_SIZE)
-#define LEFT (STENCIL_SIZE-1)
-#define RIGHT (STENCIL_SIZE)
 
 // boundary types
 #define BC_WALL 0
 #define BC_PERIODIC 1
+#define BC_FREE 2
 
 //#define flatind()
 
