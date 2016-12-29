@@ -1,3 +1,5 @@
+#!python
+
 import numpy as np
 import hydroPlayground as hp
 

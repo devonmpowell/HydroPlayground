@@ -20,7 +20,7 @@
 #define MOMZ 4 
 
 // macros for getting zone indices from the face index
-#define STENCIL_SIZE 1 // num boundary ghosts
+#define STENCIL_SIZE 2 // num boundary ghosts
 #define ZL(i) ((i)+STENCIL_SIZE-1)
 #define ZR(i) ((i)+STENCIL_SIZE)
 
@@ -39,21 +39,33 @@ typedef int dvec[3];
 typedef struct {
 	real rho; // density
 	rvec mom; // momentum
+	rvec com; // the first moment in position 
 	real etot; // total energy
 #ifdef RADIATION
 #endif
 } hydro_vector;
 
 typedef struct {
-	real rho; //density
+	real rho_l, rho_c, rho_r;
 	real etot; // total energy
 	rvec v; // velocity
-	real e; // specific internal energy
-	real p; // pressure
-	real c; // sound speed
+	real e_l, e_c, e_r; // specific internal energy
+	real p_l, p_c, p_r; // pressure
+	real c_l, c_c, c_r; // sound speed
 #ifdef RADIATION
 #endif
 } hydro_derived_state; 
+
+
+
+#define RAY_BASE_BITS(x) ((x)&((1<<hp->dim)-1))
+
+typedef struct {
+	unsigned long direction; // this ID's bits give the direction and shape of the ray
+	rvec origin;
+	real time;
+	real energy;
+} hydro_ray;
 
 // the grid 
 typedef struct {
@@ -77,6 +89,13 @@ typedef struct {
 	int dim; // the problem dimension, 1, 2, or 3
 	dvec nx; // the grid dimensions 
 	dvec strides; // the grid strides in each dimension
+
+	// the callback function pointer
+	void (*output_callback)(void*);
+
+	// experimental! Radiation field!
+	hydro_ray *rays;
+	int nrays, base_ray_lvl, max_ray_lvl;
 	
 } hydro_problem;
 

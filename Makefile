@@ -11,33 +11,27 @@
 
 
 # Source files
-SOURCES = driver.c eos.c
-COMMON = common.h eos.h 
-OBJ = $(SOURCES:.c=.o)
-LIBOUT = lib/hydroplay.so 
+SOURCES = src/driver.c src/eos.c src/radiation.c
+COMMON = include/common.h include/eos.h Makefile hydroPlayground.py 
+LIBOUT = hydroplay.so 
 
 # compiler options
 CC = gcc
 CFLAGS = -shared -fPIC -O3 -Wall
+INC = -I./include 
+OBJ = $(SOURCES:.c=.o)
 LDFLAGS += -lm
 
-# enable MPI?
-#ifeq ($(strip $(USE_MPI)), 1)
-#DEF += -DUSE_MPI
-#CC = mpicc
-#endif
+
+# Makefile rules!
 
 all: $(LIBOUT)
 
-$(LIBOUT): $(COMMON) $(OBJ) dirs 
+$(LIBOUT): $(COMMON) $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS) $(CFLAGS)
 
 .c.o: $(COMMON)
 	$(CC) -c -o $@ $(INC) $(CFLAGS) $<
 
-dirs:
-	@- if ! test -e obj; then mkdir obj; fi
-	@- if ! test -e lib; then mkdir lib; fi
-
 clean:
-	rm -f $(OBJ) *~ core $(EXE)
+	rm -rf src/*.o $(LIBOUT) *~ core
