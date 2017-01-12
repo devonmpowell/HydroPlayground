@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.tri as mtri
+from matplotlib.collections import PolyCollection
 import ctypes
 from ctypes import *
 import warnings
@@ -8,6 +10,7 @@ import os
 import time
 import inspect 
 import itertools
+from scipy.stats import norm
 
 # nice plot styling
 matplotlib.rcParams['font.family'] = 'monospace'
@@ -36,7 +39,7 @@ def _default_init(self):
     grid['com'] = 0.0
 
 def _default_output(self):
-    print "  - Step %d, t = %f, mean dt = %.2e" % (self.step, self.time, self.time/max(self.step, 1))
+    print "  - Step %d, t = %f, dt = %.2e" % (self.step, self.time, self.dt)
 
 # default plot-maker
 def _default_plots(self, fsz=8):
@@ -60,7 +63,7 @@ def _default_plots(self, fsz=8):
     if self.dim == 1:
         self.fig, ax = plt.subplots(4, 1, figsize=(fsz, fsz), sharex=True)
     if self.dim == 2:
-        self.fig, ax = plt.subplots(1, 4, figsize=(4*fsz, fsz))
+        self.fig, ax = plt.subplots(1, 3, figsize=(3*fsz, fsz))
     if self.dim == 3:
         self.fig, ax = plt.subplots(1, 3, figsize=(3*fsz, fsz))
     if self.dim == 1:
@@ -94,46 +97,79 @@ def _default_plots(self, fsz=8):
 
 
     if self.dim == 2:
-        imargs = {'interpolation': 'nearest', 'origin': 'lower'}
+        imargs = {'interpolation': 'nearest', 'origin': 'lower', 'extent': [0,1,0,1]}
 
-        #if hasattr(self, 'fig'):
-            #ax = self.fig.get_axes()
-        #else:
+        tetinds = self.nptets['verts'][:,:3]
+        triang = mtri.Triangulation(self.npverts['pos'][:,0], self.npverts['pos'][:,1], tetinds)
 
-        ax[0].imshow(rho.T, **imargs)
+        ax[0].imshow(rho, **imargs)
+        #ax[0].tripcolor(triang, self.npverts['rho'], shading='gouraud', cmap=plt.cm.RdBu_r)
+        #ax[0].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
         ax[0].set_ylabel(r'$y$')
         ax[0].set_xlabel(r'$x$')
-        ax[0].set_title('rho')
+        ax[0].set_xlim(0, 1)
+        ax[0].set_ylim(0, 1)
+        ax[0].set_title('density')
 
-        ax[1].imshow(vel.T, **imargs)
+        ax[1].imshow(vel, **imargs)
+        #ax[1].tripcolor(triang, self.npverts['vel'][:,0], shading='gouraud', cmap=plt.cm.RdBu_r)
+        #ax[1].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
         ax[1].set_ylabel(r'$y$')
         ax[1].set_xlabel(r'$x$')
-        ax[1].set_title('vel')
+        ax[1].set_xlim(0, 1)
+        ax[1].set_ylim(0, 1)
+        ax[1].set_title('velocity (x)')
 
-        ax[2].imshow(p.T, **imargs)
+        ax[2].imshow(p, **imargs)
+        #ax[2].tripcolor(triang, self.npverts['etot'], shading='gouraud', cmap=plt.cm.RdBu_r)
+        #ax[2].tripcolor(triang, np.sum()self.npverts['rho'][self.nptets['verts']], shading='gouraud', cmap=plt.cm.RdBu_r)
+        #ax[2].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
         ax[2].set_ylabel(r'$y$')
         ax[2].set_xlabel(r'$x$')
         ax[2].set_title('pressure')
+        ax[2].set_xlim(0, 1)
+        ax[2].set_ylim(0, 1)
+        #ax[2].set_title('etot')
+        #ax[2].set_title('mass error')
+        #print "rhomin =", np.min(self.npverts['rho'])
+        #print "rhomax =", np.max(self.npverts['rho'])
+
+        #ax[3].scatter(xmean[:,:,0], xmean[:,:,1], c=rho, s = 4, lw = 0)
+        #ax[3].set_aspect('equal')
+        #ax[3].set_xlim(0,1)
+        #ax[3].set_ylim(0,1)
+        #ax[3].set_ylabel(r'$y$')
+        #ax[3].set_xlabel(r'$x$')
+        #ax[3].set_title('cell center of mass')
 
 
-        ax[3].scatter(xmean[:,:,0], xmean[:,:,1], c=rho, s = 4, lw = 0)
-        ax[3].set_aspect('equal')
-        ax[3].set_xlim(0,1)
-        ax[3].set_ylim(0,1)
-        ax[3].set_ylabel(r'$y$')
-        ax[3].set_xlabel(r'$x$')
-        ax[3].set_title('cell center of mass')
-
-        #xmean[:,:,:self.dim] += self.dx*np.transpose(0.5+np.mgrid[:self.nx[0],:self.nx[1]])
-
-        dcm = np.sqrt(np.sum((xmean[1:,1:,:]-xmean[:-1,1:,:])**2 +
-            (xmean[1:,1:,:]-xmean[1:,:-1,:])**2, axis=-1))/self.dx
+        #dcm = np.sqrt(np.sum((xmean[1:,1:,:]-xmean[:-1,1:,:])**2 +
+            #(xmean[1:,1:,:]-xmean[1:,:-1,:])**2, axis=-1))/self.dx
         #ax[3].imshow(dcm.T, **imargs)
         #ax[3].set_ylabel(r'$y$')
         #ax[3].set_xlabel(r'$x$')
         #ax[3].set_title(r'$\Delta_\mathrm{cm}$')
 
+        print "Plotting radiation field!"
+        from matplotlib.patches import Wedge
+        from matplotlib.collections import PatchCollection
+        allrays = [Wedge(ray['origin'][:2], ray['time']*1000, ray['dir']/32.0*360, \
+                (ray['dir']+1)/32.0*360, width=ray['dt']*1000) for ray in self.pyrad[:self.nrays]]
+        ax[0].add_collection(PatchCollection(allrays, lw = 0.4, alpha = 0.6, facecolor='white'))
 
+        # verticies by subtracting random offsets from those center-points
+        #numpoly, numverts = 100, 4
+        #centers = np.random.random((numpoly,2))
+        #offsets = 0.1 * np.random.random((numverts,numpoly,2))
+        #verts = centers + offsets
+        #verts = np.swapaxes(verts, 0, 1)
+        
+        ## Color scalar...
+        ## in as "facecolors=colorval" when you create the PolyCollection
+        #z = np.random.random(numpoly) * 500
+        #coll = PolyCollection(verts, array=z, cmap=plt.cm.jet, edgecolors='none')
+        #ax[3].add_collection(coll)
+        #ax[3].set_title('radiation')
 
     if self.dim == 3:
         imargs = {'interpolation': 'nearest', 'origin': 'lower'}
@@ -158,8 +194,7 @@ def _default_plots(self, fsz=8):
         ax[2].set_xlabel(r'$x$')
         ax[2].set_title('pressure')
 
-    print 'delta cm [ %f , %f]' % (np.min(dcm), np.max(dcm))
-
+    #print 'delta cm [ %f , %f]' % (np.min(dcm), np.max(dcm))
     plt.show()
     ax[-1].set_xlabel(r'$x$')
     self.fig.suptitle('%s, step = %d, t = %.03f' % (self.name, self.step, self.time))
@@ -181,12 +216,13 @@ _default_params = {
 class HydroProblem(Structure):
 
     # c struct fields 
-    _fields_ = [("name", c_char_p), ("time", c_double), ('step', c_int),
+    _fields_ = [("name", c_char_p), ("time", c_double), ("dt", c_double), ('step', c_int),
         ("eos_gamma", c_double), ("eos_p", c_void_p), ("cfl_fac", c_double),
         ("dx", c_double), ("bctype", c_int), ("grid", c_void_p), 
         ("dim", c_int), ("nx", 3*c_int), ("strides", 3*c_int),
         ("on_output", CFUNCTYPE(c_void_p, c_void_p)),
-        ("rays", c_void_p), ("nrays", c_int), ("base_ray_lvl", c_int), ("max_ray_lvl", c_int)] 
+        ("rays", c_void_p), ("nrays", c_int), ("base_ray_lvl", c_int), ("max_ray_lvl", c_int), 
+        ("mesh_verts", c_void_p), ("mesh_tets", c_void_p), ("nverts", c_int), ("ntets", c_int)] 
 
     def __init__(self, params_dict=_default_params, verbose=True):
 
@@ -224,7 +260,7 @@ class HydroProblem(Structure):
             print "\nSetting up the grid..."
         self.nghosts = 2 
         self.dtype = np.dtype([('rho', np.float64), ('mom', np.float64, (3,)), ('com', np.float64, (3,)), ('etot', np.float64)]);
-        self.pygrid = np.zeros(tuple(axsz+2*self.nghosts for axsz in self.nx[:self.dim]), dtype=self.dtype)
+        self.pygrid = np.ones(tuple(axsz+2*self.nghosts for axsz in self.nx[:self.dim]), dtype=self.dtype)
         tstr = tuple(np.cumprod(np.append(1,self.pygrid.shape))[:self.dim])
         self.strides = tstr
 
@@ -232,8 +268,9 @@ class HydroProblem(Structure):
         # setup the problem by calling the grid setup callback
         if self.verbose:
             print "\nSetting up the radiation field buffer..."
-        self.rdtype = np.dtype([('dir', np.uint64), ('origin', np.float64, (3,)), ('time', np.float64),('energy', np.float64)]);
-        self.pyrad = np.ones(1024, dtype=self.rdtype)
+        self.rdtype = np.dtype([('dir', np.uint64), ('origin', np.float64, (3,)), ('time',
+            np.float64), ('dt', np.float64),('energy', np.float64)]);
+        self.pyrad = np.zeros(1024, dtype=self.rdtype)
         self.nrays = 0
 
         if self.verbose:
@@ -252,9 +289,44 @@ class HydroProblem(Structure):
         self.step = 0
         self.wallstart = time.time()
 
+        # EXPERIMENTAL: initialize the Lagrangian tet mesh
+        # TODO: 2D only for now...
+        # create a Delaunay triangulation
+        # with some boundary guards
+        ldim = 48 
+        vpos = (1.0/ldim*np.mgrid[:ldim+1,:ldim+1]).T
+        vpos[1:-1,1:-1] += 0.6/ldim*(0.5-np.random.sample((ldim-1, ldim-1, 2)))
+        vpos = vpos.reshape((ldim+1)**2, 2)
+        self.nverts = vpos.shape[0]
+        triang = mtri.Triangulation(vpos[:,0], vpos[:,1])
+        self.ntets = triang.triangles.shape[0]
+
+        # initialize the vertices
+        vtype = np.dtype([('pos', np.float64, (3,)), ('vel', np.float64, (3,)), ('rho', np.float64),  ('etot', np.float64)]);
+        self.npverts = np.zeros((self.nverts), dtype=vtype)
+        self.npverts['rho'] = 1.0
+        self.npverts['pos'][:,:2] = vpos
+        self.npverts['vel'] = 0.0
+        self.npverts['etot'] = 1.0
+        self.mesh_verts = self.npverts.ctypes.data_as(c_void_p) 
+
+        len = np.sqrt(np.sum((vpos-0.5)**2, axis=1))
+        norm = (vpos-0.5)
+        #norm[:,0] /= len
+        #norm[:,1] /= len
+        self.npverts['vel'][:,0] = 10.0*norm[:,0]*np.exp(-((vpos[:,0]-0.5)**2+(vpos[:,1]-0.5)**2)/(2*0.1**2)) 
+        #self.npverts['vel'][:,1] = 100.0*norm[:,1]*np.exp(-((vpos[:,0]-0.5)**2+(vpos[:,1]-0.5)**2)/(2*0.1**2)) 
+
+        # initialize the tets
+        ttype = np.dtype([('rho', np.float64), ('mom', np.float64, (3,)), ('com', np.float64, (3,)),
+            ('etot', np.float64), ('verts', np.int32, (4,))])
+        self.nptets = np.zeros(self.ntets, dtype=ttype)
+        self.nptets['verts'][:,:3] = triang.triangles
+        self.mesh_tets = self.nptets.ctypes.data_as(c_void_p) 
+
         # do C things like find grid strides, etc
-        # TODO: figure out how to reference C function pointers!
         _hp.init(byref(self))
+
 
     def __del__(self):
         if self.verbose:
@@ -287,6 +359,9 @@ class HydroProblem(Structure):
             return self.pygrid[self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]
         if self.dim == 1:
             return self.pygrid[self.nghosts:-self.nghosts]
+
+    def getRays(self):
+        return self.pyrad[:self.nrays]
 
     def write(self):
         # TODO: figure out how to do output callbacks!!!

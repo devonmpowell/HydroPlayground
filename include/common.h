@@ -60,19 +60,33 @@ typedef struct {
 
 #define RAY_BASE_BITS(x) ((x)&((1<<hp->dim)-1))
 
+#define CLIGHT 1000.0
 typedef struct {
 	unsigned long direction; // this ID's bits give the direction and shape of the ray
 	rvec origin;
-	real time;
+	real time, dt;
 	real energy;
 } hydro_ray;
+
+typedef struct {
+	real mass; // total mass 
+	rvec mom; // total momentum
+	rvec com; // the first moment in position 
+	real etot; // total energy
+	int verts[4];
+} hydro_lagrange_tet;
+
+typedef struct {
+	rvec pos, vel;
+	real rho, etot;
+} hydro_lagrange_vert;
 
 // the grid 
 typedef struct {
 
 	// current and stopping time
 	char* name;
-	real time;
+	real time, dt;
 	int step;
 
 	// equation of state functions
@@ -96,6 +110,12 @@ typedef struct {
 	// experimental! Radiation field!
 	hydro_ray *rays;
 	int nrays, base_ray_lvl, max_ray_lvl;
+
+	// experimental! Lagrangian mesh.
+	hydro_lagrange_vert* mesh_verts;
+	hydro_lagrange_tet* mesh_tets;
+	int nverts, ntets;
+	
 	
 } hydro_problem;
 

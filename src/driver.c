@@ -18,6 +18,8 @@
 #include "eos.h"
 #include "radiation.h"
 
+#include "csparse.h"
+
 
 // forward definitions
 int init();
@@ -51,8 +53,6 @@ hydro_derived_state get_derived_state(dvec cell, int iterax, hydro_problem* hp) 
 
 	ds.rho_l = ds.rho_c; 
 	ds.rho_r = ds.rho_c;
-
-
 
 	ds.etot = hvec.etot;
 	for(ax = 0, v2 = 0.0; ax < hp->dim; ++ax) {
@@ -309,7 +309,6 @@ void update_skewer(dvec skewer, int iterax, real fluxfac, hydro_problem* hp) {
 			hp->grid[flatind].mom[ax] -= fluxfac*flux.mom[ax];
 		hp->grid[flatind].etot -= fluxfac*flux.etot;
 		hp->grid[flatind].com[iterax] -= 0.5*hp->dx*fluxfac*flux.rho;
-		//hp->grid[flatind].com[iterax] -= fluxfac*flux.com[iterax];
 
 		skewer[iterax] = i;
 		flatind = flat_index(skewer, hp);
@@ -318,7 +317,6 @@ void update_skewer(dvec skewer, int iterax, real fluxfac, hydro_problem* hp) {
 			hp->grid[flatind].mom[ax] += fluxfac*flux.mom[ax];
 		hp->grid[flatind].etot += fluxfac*flux.etot;
 		hp->grid[flatind].com[iterax] += -0.5*hp->dx*fluxfac*flux.rho;
-		//hp->grid[flatind].com[iterax] += fluxfac*flux.com[iterax];
 	}
 }
 
@@ -326,19 +324,20 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 
 	int i, j, iterax, done;
 	dvec skewer;
-	real dt, alpha_max;
+	real alpha_max;
   
 	// loop until t > tmax
 	tstop += hp->time;
 	max_steps += hp->step;
-	for(done = 0; hp->step < max_steps && !done; hp->step++, hp->time += dt) {
+	for(done = 0; hp->step < max_steps && !done; hp->step++, hp->time += hp->dt) {
 
 		// get the max. characteristic speed on the grid
 		// time step based on CFL condition
 		alpha_max = get_max_char_speed(hp);
-		dt = hp->cfl_fac*hp->dx/alpha_max;
-		if(hp->time + dt > tstop) {
-			dt = tstop - hp->time;
+		hp->dt = hp->cfl_fac*hp->dx/alpha_max;
+
+		if(hp->time + hp->dt > tstop) {
+			hp->dt = tstop - hp->time;
 			done = 1;
 		}
 
@@ -346,15 +345,11 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 		if(hp->output_callback && hp->step%output_every == 0)
 			hp->output_callback(hp);
 
+#if 0
 		// Solve the approximate Riemann problem for fluxes
-		// Strang splitting for directional update operators
-		
-		for(i = 0; i < 5; ++i)
-			update_radiation(0.1*dt, hp);
-
-		// TODO: replace all of this skewer nonsense with a general grid!!
 		// solve in all three axis directsions for 0.5*dt, 
-		real stfac = 0.5*dt/hp->dx; // half-step factor
+		// TODO: replace Strang splitting with a general
+		real stfac = 0.5*hp->dt/hp->dx; // half-step factor
 		for(iterax = 0; iterax < hp->dim; ++iterax) {
 			// iterate over all skewers in this axis 
 			if(hp->dim == 1)
@@ -375,8 +370,22 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 		}
 
 		// source term update sandwiched in the middle
-		update_source_terms(dt, hp);
+		update_source_terms(hp->dt, hp);
+#endif
 
+		// update radiation, using just enough steps to avoid
+		// violating the CFL condition for radiation
+		real dtrad = hp->cfl_fac*hp->dx/CLIGHT;
+		int nrstep = ceil(hp->dt/dtrad);
+		//printf("Radiation subcycles = %d\n", nrstep);
+		dtrad = hp->dt/nrstep;
+		for(i = 0; i < nrstep; ++i)
+			update_radiation(dtrad, hp);
+
+		// update the Lagrange mesh
+		//update_lagrange_mesh(dt, hp);
+
+#if 0
 		// solve in all three axis directsions for 0.5*dt, 
 		// but in the reverse order
 		for(iterax = hp->dim-1; iterax >= 0; --iterax) {
@@ -396,9 +405,7 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 					}
 				}
 		}
-
-		for(i = 0; i < 5; ++i)
-			update_radiation(0.1*dt, hp);
+#endif
 
 	}
 	if(hp->output_callback)
@@ -439,10 +446,259 @@ void writeout(hydro_problem* hp) {
 	fclose(output);
 }
 
+#define FUZZ 1.0e-10
+void update_lagrange_mesh(real dt, hydro_problem* hp) {
+
+	int iter, t, i, c, v, ax;
+	real vtot, vol, mtest, err, max_err;
+	rvec dv[4];
+	rvec tpos, tvel;
+	hydro_lagrange_vert vert;
+	hydro_lagrange_tet tet;
+
+	real* tperv = malloc(hp->nverts*sizeof(real));
+	real* drho = malloc(hp->nverts*sizeof(real));
+
+	for(v = 0; v < hp->nverts; ++v) {
+		if(hp->mesh_verts[v].pos[ax] != 0.0 && hp->mesh_verts[v].pos[ax] != 1.0)
+			hp->mesh_verts[v].pos[ax] += dt*hp->mesh_verts[v].vel[ax];
+	}
+
+
+
+	max_err = 1000.0;
+	real err_old = 2.0;
+	for(iter = 0; max_err > FUZZ && iter < 1000; ++iter) {
+
+		max_err = 0.0;
+
+		memset(tperv, 0, hp->nverts*sizeof(real));
+		memset(drho, 0, hp->nverts*sizeof(real));
+		for(t = 0; t < hp->ntets; ++t) {
+			
+			// first, get the tet and update its volume
+			tet = hp->mesh_tets[t];
+			for(v = 0; v < hp->dim+1; ++v)
+				for(i = 0; i < hp->dim; ++i)
+					dv[v][i] = hp->mesh_verts[tet.verts[v]].pos[i];
+			vol = 0.5*((dv[1][0]-dv[0][0])*(dv[2][1]-dv[0][1])-(dv[2][0]-dv[0][0])*(dv[1][1]-dv[0][1]));
+			real vfac = vol/(hp->dim+1);
+
+			// TODO: figure out what the relevant step factor for the density is!!!
+			// get the mass of the tet as given by its current volume and densities
+			// compute the error and relax the mesh towards the solution
+			for(v = 0, mtest = 0.0; v < hp->dim+1; ++v)
+				mtest += vfac*hp->mesh_verts[tet.verts[v]].rho;
+			err = tet.mass - mtest;
+			if(fabs(err/tet.mass) > max_err) 
+				max_err = fabs(err/(tet.mass+FUZZ));
+			for(v = 0; v < hp->dim+1; ++v) {
+				drho[tet.verts[v]] += err/vfac; 
+				tperv[tet.verts[v]] += 1; 
+			}
+		}
+		for(v = 0; v < hp->nverts; ++v) {
+			drho[v] /= tperv[v];
+			hp->mesh_verts[v].rho += 0.1*drho[v];
+		}
+
+
+#if 0
+		for(ax = 0; ax < 2; ++ax) {
+
+			memset(tperv, 0, hp->nverts*sizeof(real));
+			memset(drho, 0, hp->nverts*sizeof(real));
+			for(t = 0; t < hp->ntets; ++t) {
+				
+				// first, get the tet and update its volume
+				tet = hp->mesh_tets[t];
+
+				
+				for(v = 0; v < hp->dim+1; ++v)
+					for(i = 0; i < hp->dim; ++i)
+						dv[v][i] = hp->mesh_verts[tet.verts[v]].pos[i];
+				vol = 0.5*((dv[1][0]-dv[0][0])*(dv[2][1]-dv[0][1])-(dv[2][0]-dv[0][0])*(dv[1][1]-dv[0][1]));
+				real vfac = vol/(hp->dim+1);
+	
+				// TODO: figure out what the relevant step factor for the density is!!!
+				// get the mass of the tet as given by its current volume and densities
+				// compute the error and relax the mesh towards the solution
+				mtest = 0.0;
+				real sumrho = 0.0;
+				real sumx = 0.0;
+				for(v = 0, mtest = 0.0; v < hp->dim+1; ++v) {
+					sumrho += hp->mesh_verts[tet.verts[v]].rho;
+					sumx += hp->mesh_verts[tet.verts[v]].pos[ax];
+					mtest += hp->mesh_verts[tet.verts[v]].rho*hp->mesh_verts[tet.verts[v]].pos[ax];
+				}
+				mtest = (vol/12.0)*(sumrho*sumx+mtest);
+				err = tet.com[ax] - mtest;
+				if(fabs(err/tet.mass) > max_err) 
+					max_err = fabs(err/(tet.mass+FUZZ));
+
+				// update the gradient
+				for(v = 0; v < hp->dim+1; ++v) {
+					drho[tet.verts[v]] += 12.0*err/(vol*(sumrho+hp->mesh_verts[tet.verts[v]].rho)); 
+					tperv[tet.verts[v]] += 1;
+				}
+			}
+			for(v = 0; v < hp->nverts; ++v) {
+				drho[v] /= tperv[v];
+				if(hp->mesh_verts[v].pos[ax] != 0.0 && hp->mesh_verts[v].pos[ax] != 1.0)
+					hp->mesh_verts[v].pos[ax] += 0.0001*drho[v];
+			}
+		
+		}
+
+		for(ax = 0; ax < 2; ++ax) {
+
+			memset(tperv, 0, hp->nverts*sizeof(real));
+			memset(drho, 0, hp->nverts*sizeof(real));
+			for(t = 0; t < hp->ntets; ++t) {
+				
+				// first, get the tet and update its volume
+				tet = hp->mesh_tets[t];
+
+				
+				for(v = 0; v < hp->dim+1; ++v)
+					for(i = 0; i < hp->dim; ++i)
+						dv[v][i] = hp->mesh_verts[tet.verts[v]].vel[i];
+				vol = 0.5*((dv[1][0]-dv[0][0])*(dv[2][1]-dv[0][1])-(dv[2][0]-dv[0][0])*(dv[1][1]-dv[0][1]));
+				real vfac = vol/(hp->dim+1);
+	
+				// TODO: figure out what the relevant step factor for the density is!!!
+				// get the mass of the tet as given by its current volume and densities
+				// mompute the error and relax the mesh towards the solution
+				mtest = 0.0;
+				real sumrho = 0.0;
+				real sumx = 0.0;
+				for(v = 0, mtest = 0.0; v < hp->dim+1; ++v) {
+					sumrho += hp->mesh_verts[tet.verts[v]].rho;
+					sumx += hp->mesh_verts[tet.verts[v]].vel[ax];
+					mtest += hp->mesh_verts[tet.verts[v]].rho*hp->mesh_verts[tet.verts[v]].vel[ax];
+				}
+				mtest = (vol/12.0)*(sumrho*sumx+mtest);
+				err = tet.mom[ax] - mtest;
+				if(fabs(err/tet.mass) > max_err) 
+					max_err = fabs(err/(tet.mass+FUZZ));
+
+				// update the gradient
+				for(v = 0; v < hp->dim+1; ++v) {
+					drho[tet.verts[v]] += 12.0*err/(vol*(sumrho+hp->mesh_verts[tet.verts[v]].rho)); 
+					tperv[tet.verts[v]] += 1;
+				}
+			}
+			for(v = 0; v < hp->nverts; ++v) {
+				drho[v] /= tperv[v];
+				//if(hp->mesh_verts[v].pos[ax] != 0.0 && hp->mesh_verts[v].pos[ax] != 1.0)
+					//hp->mesh_verts[v].vel[ax] += 0.001*drho[v];
+			}
+		
+		}
+#endif
+
+
+
+		if(max_err > err_old) {
+			printf(" --> Stopped converging at iter %d !!\n", iter);
+			break;
+		} 
+		err_old = max_err; 
+	}
+
+					//exit(0);
+
+	real mtot = 0.0;
+
+	// use the vertex-centered values to the cell-centered moments
+	for(t = 0; t < hp->ntets; ++t) {
+		tet = hp->mesh_tets[t];
+
+		// TODO: make a 2D orient function here...
+		for(v = 0; v < hp->dim+1; ++v)
+			for(i = 0; i < hp->dim; ++i)
+				dv[v][i] = hp->mesh_verts[tet.verts[v]].pos[i];
+		vol = 0.5*((dv[1][0]-dv[0][0])*(dv[2][1]-dv[0][1])-(dv[2][0]-dv[0][0])*(dv[1][1]-dv[0][1]));
+
+		// initialize mass and moments
+		for(v = 0; v < hp->dim+1; ++v) 
+			mtot += 0.3333333333*vol*hp->mesh_verts[tet.verts[v]].rho;
+
+	}
+	printf("Mtot = %f\n", mtot);
+
+
+
+	free(tperv);
+	free(drho);
+
+	printf(" gradient descent-ish density solve complete, iter = %d, max err = %.5e\n", iter, max_err);
+
+
+	// next, update all fluxes through the mesh faces, and update the cell-centered quantities
+	
+	// source terms, just momentum for now 
+	for(t = 0; t < hp->ntets; ++t) {
+		for(i = 0; i < 3; ++i)
+			hp->mesh_tets[t].com[i] += dt*hp->mesh_tets[t].mom[i];
+	}
+	
+}
+
 int init(hydro_problem* hp) {
 
 	// TODO: this is the only thing to get into Python!!!
 	hp->eos_p = eos_ideal_p;
+
+	// initialize the Lagrange mesh
+	
+	int i, c, t, jj, kk, v, iter, tind;
+	real vol, vtot, mtest, err, sumrho, sumx;
+	rvec dv[4];
+	hydro_lagrange_vert vert;
+	hydro_lagrange_tet tet;
+
+	// use the vertex-centered values to the cell-centered moments
+	for(t = 0; t < hp->ntets; ++t) {
+		tet = hp->mesh_tets[t];
+
+		// TODO: make a 2D orient function here...
+		for(v = 0; v < hp->dim+1; ++v)
+			for(i = 0; i < hp->dim; ++i)
+				dv[v][i] = hp->mesh_verts[tet.verts[v]].pos[i];
+		vol = 0.5*((dv[1][0]-dv[0][0])*(dv[2][1]-dv[0][1])-(dv[2][0]-dv[0][0])*(dv[1][1]-dv[0][1]));
+
+		// initialize mass and moments
+		tet.mass = 0.0;
+		for(v = 0; v < hp->dim+1; ++v) 
+			tet.mass += 0.3333333333*vol*hp->mesh_verts[tet.verts[v]].rho;
+
+		for(i = 0; i < hp->dim; ++i) {
+
+			// cell COM
+			sumrho = 0.0, sumx = 0.0;
+			for(v = 0; v < hp->dim+1; ++v) {
+				sumrho += hp->mesh_verts[tet.verts[v]].rho;
+				sumx += hp->mesh_verts[tet.verts[v]].pos[i];
+				tet.com[i] += hp->mesh_verts[tet.verts[v]].rho*hp->mesh_verts[tet.verts[v]].pos[i];
+			}
+			tet.com[i] = (vol/12.0)*(sumrho*sumx+tet.com[i]);
+
+			// Cell momentum
+			sumrho = 0.0, sumx = 0.0;
+			for(v = 0; v < hp->dim+1; ++v) {
+				sumrho += hp->mesh_verts[tet.verts[v]].rho;
+				sumx += hp->mesh_verts[tet.verts[v]].vel[i];
+				tet.mom[i] += hp->mesh_verts[tet.verts[v]].rho*hp->mesh_verts[tet.verts[v]].vel[i];
+			}
+			tet.mom[i] = (vol/12.0)*(sumrho*sumx+tet.mom[i]);
+
+		}
+		// TODO: this only works with zero kinetic energy
+		for(v = 0; v < hp->dim+1; ++v) 
+			tet.etot += 0.3333333333*tet.mass*hp->mesh_verts[tet.verts[v]].etot;
+		hp->mesh_tets[t] = tet;
+	}
 	return 1;
 }
 

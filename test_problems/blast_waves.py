@@ -1,12 +1,9 @@
 #!python
 
 import numpy as np
+import sys
+sys.path.insert(0, '.')
 import hydroPlayground as hp
-
-# plotting function
-def make_plots(hp, fsz=6):
-    if hp.dim == 1:
-        print 'yay'
 
 # set up a callback function
 # used to initialize the grid cells
@@ -38,9 +35,9 @@ params = {
 }
 
 # set up the test
-sod_test = hp.HydroProblem(params_dict=params)
+hydroprob = hp.HydroProblem(params_dict=params)
 
 # run in user-specified time chunks. Nice for plotting and dumping output!
 for i in xrange(10):
-    sod_test.run(tstop=0.2, max_steps=1000, output_every=50)
-    sod_test.plots()
+    hydroprob.run(tstop=0.2, max_steps=1000, output_every=50)
+    hydroprob.plot()

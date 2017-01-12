@@ -18,14 +18,26 @@
 
 void update_radiation(real dt, hydro_problem* hp) {
 
+	int i;
+	int r;
+	real rmin, rmax;
+
 	//printf("Updating radiation!\n");
 
 	if(hp->nrays > 1024) printf("Error! Overflowed ray buffer.\n");
 
-#define CLIGHT 10000.0
+	// STEP 1: source all of the rays
+	for(r = 0; r < 32; ++r) {
+		hydro_ray ray;
+		ray.direction = r;
+		ray.time = 0.0;
+		for(i = 0; i < hp->dim; ++i)
+			ray.origin[i] = hp->dx*((hp->nx[i]/2)+0.5);
+		if(hp->nrays < 1024)
+			hp->rays[hp->nrays++] = ray;
+	}
 
-	int r;
-	real rmin, rmax;
+
 	for(r = 0; r < hp->nrays; ++r) {
 		hydro_ray ray = hp->rays[r];
 
@@ -40,6 +52,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 	
 	
 		ray.energy *= 0.9;
+		ray.dt = dt;
 		ray.time += dt;
 		hp->rays[r] = ray;
 	}
