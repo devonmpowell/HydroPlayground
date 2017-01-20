@@ -336,6 +336,8 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 		alpha_max = get_max_char_speed(hp);
 		hp->dt = hp->cfl_fac*hp->dx/alpha_max;
 
+		hp->dt = 0.0001;
+
 		if(hp->time + hp->dt > tstop) {
 			hp->dt = tstop - hp->time;
 			done = 1;
@@ -378,6 +380,8 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 		real dtrad = hp->cfl_fac*hp->dx/CLIGHT;
 		int nrstep = ceil(hp->dt/dtrad);
 		//printf("Radiation subcycles = %d\n", nrstep);
+
+		nrstep = 1;
 		dtrad = hp->dt/nrstep;
 		for(i = 0; i < nrstep; ++i)
 			update_radiation(dtrad, hp);

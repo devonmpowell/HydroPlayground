@@ -18,9 +18,9 @@ LIBOUT = hydroplay.so
 # compiler options
 CC = gcc
 CFLAGS = -shared -fPIC -O3 -Wall
-INC = -I./include 
+INC = -I./include -I../r3d 
 OBJ = $(SOURCES:.c=.o)
-LDFLAGS += -lm
+LDFLAGS += -L../r3d -lm -lr3d
 
 
 # Makefile rules!

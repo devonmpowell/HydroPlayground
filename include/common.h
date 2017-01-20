@@ -29,6 +29,8 @@
 #define BC_PERIODIC 1
 #define BC_FREE 2
 
+#define TWO_PI 6.28318530718
+
 //#define flatind()
 
 // real type
@@ -62,10 +64,10 @@ typedef struct {
 
 #define CLIGHT 1000.0
 typedef struct {
-	unsigned long direction; // this ID's bits give the direction and shape of the ray
-	rvec origin;
-	real time, dt;
-	real energy;
+	real rmin, rmax; // the inner and outer radius for the timestep 
+	real thmin, thmax; // upper and lower theta for this ray 
+	dvec orcell; // the originating cell index
+	real N; // number of photons in the wavepacket
 } hydro_ray;
 
 typedef struct {

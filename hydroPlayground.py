@@ -97,11 +97,16 @@ def _default_plots(self, fsz=8):
 
 
     if self.dim == 2:
-        imargs = {'interpolation': 'nearest', 'origin': 'lower', 'extent': [0,1,0,1]}
+        imargs = {'interpolation': 'nearest', 'origin': 'lower', 'extent': [0,1,0,1], 'cmap':
+                plt.cm.RdBu_r}
 
         tetinds = self.nptets['verts'][:,:3]
         triang = mtri.Triangulation(self.npverts['pos'][:,0], self.npverts['pos'][:,1], tetinds)
 
+        radsymm = 0.25*(rho + np.roll(rho[::-1,:], 1, axis=0) + np.roll(rho[:,::-1], 1, axis=1) +
+            np.roll(np.roll(rho[::-1,::-1], 1, axis=0), 1, axis=1))
+        #ax[0].imshow(np.log10(radsymm), **imargs)
+        #print np.min(1.0-radsymm[radsymm > 0]), np.max(1.0-radsymm)
         ax[0].imshow(rho, **imargs)
         #ax[0].tripcolor(triang, self.npverts['rho'], shading='gouraud', cmap=plt.cm.RdBu_r)
         #ax[0].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
@@ -153,9 +158,12 @@ def _default_plots(self, fsz=8):
         print "Plotting radiation field!"
         from matplotlib.patches import Wedge
         from matplotlib.collections import PatchCollection
-        allrays = [Wedge(ray['origin'][:2], ray['time']*1000, ray['dir']/32.0*360, \
-                (ray['dir']+1)/32.0*360, width=ray['dt']*1000) for ray in self.pyrad[:self.nrays]]
-        ax[0].add_collection(PatchCollection(allrays, lw = 0.4, alpha = 0.6, facecolor='white'))
+
+        print self.pyrad
+
+        allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], ray['thmin']*180./np.pi, \
+                ray['thmax']*180./np.pi, width=(ray['rmax']-ray['rmin']), alpha = ray['N']) for ray in self.pyrad[:self.nrays]]
+        ax[0].add_collection(PatchCollection(allrays, lw = 1, facecolor='white', alpha = 0.2))
 
         # verticies by subtracting random offsets from those center-points
         #numpoly, numverts = 100, 4
@@ -268,8 +276,8 @@ class HydroProblem(Structure):
         # setup the problem by calling the grid setup callback
         if self.verbose:
             print "\nSetting up the radiation field buffer..."
-        self.rdtype = np.dtype([('dir', np.uint64), ('origin', np.float64, (3,)), ('time',
-            np.float64), ('dt', np.float64),('energy', np.float64)]);
+        self.rdtype = np.dtype([('rmin', np.float64), ('rmax', np.float64), ('thmin', np.float64), \
+            ('thmax', np.float64), ('orcell', np.int32, (4,)), ('N', np.float64),]) 
         self.pyrad = np.zeros(1024, dtype=self.rdtype)
         self.nrays = 0
 
@@ -279,7 +287,7 @@ class HydroProblem(Structure):
             print " - strides =", tstr 
             print " - nghosts =", self.nghosts
             print " - calling %s... " % self.init_grid.__name__,
-        self.init_grid(self)
+        self.init_grid(self.pygrid)
         self.grid = self.pygrid.ctypes.data_as(c_void_p) 
         self.rays = self.pyrad.ctypes.data_as(c_void_p) 
         if self.verbose:
