@@ -103,8 +103,6 @@ def _default_plots(self, fsz=8):
         tetinds = self.nptets['verts'][:,:3]
         triang = mtri.Triangulation(self.npverts['pos'][:,0], self.npverts['pos'][:,1], tetinds)
 
-        radsymm = 0.25*(rho + np.roll(rho[::-1,:], 1, axis=0) + np.roll(rho[:,::-1], 1, axis=1) +
-            np.roll(np.roll(rho[::-1,::-1], 1, axis=0), 1, axis=1))
         #ax[0].imshow(np.log10(radsymm), **imargs)
         #print np.min(1.0-radsymm[radsymm > 0]), np.max(1.0-radsymm)
         ax[0].imshow(rho, **imargs)
@@ -114,18 +112,23 @@ def _default_plots(self, fsz=8):
         ax[0].set_xlabel(r'$x$')
         ax[0].set_xlim(0, 1)
         ax[0].set_ylim(0, 1)
-        ax[0].set_title('density')
+        ax[0].set_title('Matter density')
 
-        ax[1].imshow(vel, **imargs)
+        radsymm = 0.25*(self.pyradgrid['E'] + np.roll(self.pyradgrid['E'][::-1,:], 1, axis=0) + np.roll(self.pyradgrid['E'][:,::-1], 1, axis=1) +
+            np.roll(np.roll(self.pyradgrid['E'][::-1,::-1], 1, axis=0), 1, axis=1))
+        #ax[1].imshow(np.log10(0.0000001+radsymm[self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+        ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+        #ax[1].imshow(vel, **imargs)
         #ax[1].tripcolor(triang, self.npverts['vel'][:,0], shading='gouraud', cmap=plt.cm.RdBu_r)
         #ax[1].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
         ax[1].set_ylabel(r'$y$')
         ax[1].set_xlabel(r'$x$')
         ax[1].set_xlim(0, 1)
         ax[1].set_ylim(0, 1)
-        ax[1].set_title('velocity (x)')
+        #ax[1].set_title('velocity (x)')
+        ax[1].set_title('pseudo-Radiation energy density')
 
-        ax[2].imshow(p, **imargs)
+        ax[2].imshow(vel, **imargs)
         #ax[2].tripcolor(triang, self.npverts['etot'], shading='gouraud', cmap=plt.cm.RdBu_r)
         #ax[2].tripcolor(triang, np.sum()self.npverts['rho'][self.nptets['verts']], shading='gouraud', cmap=plt.cm.RdBu_r)
         #ax[2].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
@@ -155,15 +158,14 @@ def _default_plots(self, fsz=8):
         #ax[3].set_xlabel(r'$x$')
         #ax[3].set_title(r'$\Delta_\mathrm{cm}$')
 
-        print "Plotting radiation field!"
+        #print "Plotting radiation field!"
         from matplotlib.patches import Wedge
         from matplotlib.collections import PatchCollection
+        #print self.pyrad
 
-        print self.pyrad
-
-        allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], ray['thmin']*180./np.pi, \
-                ray['thmax']*180./np.pi, width=(ray['rmax']-ray['rmin']), alpha = ray['N']) for ray in self.pyrad[:self.nrays]]
-        ax[0].add_collection(PatchCollection(allrays, lw = 1, facecolor='white', alpha = 0.2))
+        allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], ray['angle_id']*360./128, \
+                (ray['angle_id']+1)*360./128, width=(ray['rmax']-ray['rmin']), alpha = ray['N']) for ray in self.pyrad[:self.nrays]]
+        ax[1].add_collection(PatchCollection(allrays, lw = 1, facecolor='white', alpha = 0.09))
 
         # verticies by subtracting random offsets from those center-points
         #numpoly, numverts = 100, 4
@@ -230,6 +232,7 @@ class HydroProblem(Structure):
         ("dim", c_int), ("nx", 3*c_int), ("strides", 3*c_int),
         ("on_output", CFUNCTYPE(c_void_p, c_void_p)),
         ("rays", c_void_p), ("nrays", c_int), ("base_ray_lvl", c_int), ("max_ray_lvl", c_int), 
+        ("rad_grid", c_void_p),
         ("mesh_verts", c_void_p), ("mesh_tets", c_void_p), ("nverts", c_int), ("ntets", c_int)] 
 
     def __init__(self, params_dict=_default_params, verbose=True):
@@ -276,10 +279,13 @@ class HydroProblem(Structure):
         # setup the problem by calling the grid setup callback
         if self.verbose:
             print "\nSetting up the radiation field buffer..."
-        self.rdtype = np.dtype([('rmin', np.float64), ('rmax', np.float64), ('thmin', np.float64), \
-            ('thmax', np.float64), ('orcell', np.int32, (4,)), ('N', np.float64),]) 
-        self.pyrad = np.zeros(1024, dtype=self.rdtype)
+        self.rdtype = np.dtype([('angle_id', np.int64), ('rmin', np.float64), ('rmax', np.float64), \
+            ('orcell', np.int32, (4,)), ('N', np.float64),]) 
+        self.pyrad = np.zeros(8192, dtype=self.rdtype)
         self.nrays = 0
+
+        # Testing the radiation energy density
+        self.pyradgrid = np.ones(tuple(axsz+2*self.nghosts for axsz in self.nx[:self.dim]), dtype=np.dtype([('E', np.float64),]))
 
         if self.verbose:
             print " - underlying numpy.ndarray shape =", self.pygrid.shape
@@ -290,6 +296,7 @@ class HydroProblem(Structure):
         self.init_grid(self.pygrid)
         self.grid = self.pygrid.ctypes.data_as(c_void_p) 
         self.rays = self.pyrad.ctypes.data_as(c_void_p) 
+        self.rad_grid = self.pyradgrid.ctypes.data_as(c_void_p) 
         if self.verbose:
             print " Success!"
 

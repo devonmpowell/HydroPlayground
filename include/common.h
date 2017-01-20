@@ -64,8 +64,8 @@ typedef struct {
 
 #define CLIGHT 1000.0
 typedef struct {
+	long angle_id;
 	real rmin, rmax; // the inner and outer radius for the timestep 
-	real thmin, thmax; // upper and lower theta for this ray 
 	dvec orcell; // the originating cell index
 	real N; // number of photons in the wavepacket
 } hydro_ray;
@@ -82,6 +82,10 @@ typedef struct {
 	rvec pos, vel;
 	real rho, etot;
 } hydro_lagrange_vert;
+
+typedef struct {
+	real E;
+} rad_vector;
 
 // the grid 
 typedef struct {
@@ -112,6 +116,7 @@ typedef struct {
 	// experimental! Radiation field!
 	hydro_ray *rays;
 	int nrays, base_ray_lvl, max_ray_lvl;
+	rad_vector *rad_grid; // the conserved state vector 
 
 	// experimental! Lagrangian mesh.
 	hydro_lagrange_vert* mesh_verts;
