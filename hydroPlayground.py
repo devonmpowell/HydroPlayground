@@ -126,9 +126,9 @@ def _default_plots(self, fsz=8):
         ax[1].set_xlim(0, 1)
         ax[1].set_ylim(0, 1)
         #ax[1].set_title('velocity (x)')
-        ax[1].set_title('pseudo-Radiation energy density')
+        ax[1].set_title('radiation flux')
 
-        ax[2].imshow(vel, **imargs)
+        ax[2].imshow(p, **imargs)
         #ax[2].tripcolor(triang, self.npverts['etot'], shading='gouraud', cmap=plt.cm.RdBu_r)
         #ax[2].tripcolor(triang, np.sum()self.npverts['rho'][self.nptets['verts']], shading='gouraud', cmap=plt.cm.RdBu_r)
         #ax[2].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
@@ -165,7 +165,7 @@ def _default_plots(self, fsz=8):
 
         allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], ray['angle_id']*360./128, \
                 (ray['angle_id']+1)*360./128, width=(ray['rmax']-ray['rmin']), alpha = ray['N']) for ray in self.pyrad[:self.nrays]]
-        ax[1].add_collection(PatchCollection(allrays, lw = 1, facecolor='white', alpha = 0.09))
+        #ax[1].add_collection(PatchCollection(allrays, lw = 1, facecolor='white', alpha = 0.09))
 
         # verticies by subtracting random offsets from those center-points
         #numpoly, numverts = 100, 4
@@ -281,7 +281,7 @@ class HydroProblem(Structure):
             print "\nSetting up the radiation field buffer..."
         self.rdtype = np.dtype([('angle_id', np.int64), ('rmin', np.float64), ('rmax', np.float64), \
             ('orcell', np.int32, (4,)), ('N', np.float64),]) 
-        self.pyrad = np.zeros(8192, dtype=self.rdtype)
+        self.pyrad = np.zeros(16000, dtype=self.rdtype)
         self.nrays = 0
 
         # Testing the radiation energy density
