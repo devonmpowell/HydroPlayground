@@ -163,8 +163,8 @@ def _default_plots(self, fsz=8):
         from matplotlib.collections import PatchCollection
         #print self.pyrad
 
-        allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], ray['angle_id']*360./128, \
-                (ray['angle_id']+1)*360./128, width=(ray['rmax']-ray['rmin']), alpha = ray['N']) for ray in self.pyrad[:self.nrays]]
+        #allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], ray['angle_id']*360./128, \
+                #(ray['angle_id']+1)*360./128, width=(ray['rmax']-ray['rmin']), alpha = ray['N']) for ray in self.pyrad[:self.nrays]]
         #ax[1].add_collection(PatchCollection(allrays, lw = 1, facecolor='white', alpha = 0.09))
 
         # verticies by subtracting random offsets from those center-points
@@ -280,7 +280,7 @@ class HydroProblem(Structure):
         if self.verbose:
             print "\nSetting up the radiation field buffer..."
         self.rdtype = np.dtype([('angle_id', np.int64), ('rmin', np.float64), ('rmax', np.float64), \
-            ('orcell', np.int32, (4,)), ('N', np.float64),]) 
+            ('orcell', np.int32, (4,)), ('I', np.float64, 2),]) 
         self.pyrad = np.zeros(16000, dtype=self.rdtype)
         self.nrays = 0
 

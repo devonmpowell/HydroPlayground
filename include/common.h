@@ -67,7 +67,7 @@ typedef struct {
 	long angle_id;
 	real rmin, rmax; // the inner and outer radius for the timestep 
 	dvec orcell; // the originating cell index
-	real N; // number of photons in the wavepacket
+	rvec I; // intensity at each vertex of the beam 
 } hydro_ray;
 
 typedef struct {
