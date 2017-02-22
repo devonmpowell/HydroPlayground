@@ -335,6 +335,7 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 		// time step based on CFL condition
 		alpha_max = get_max_char_speed(hp);
 		hp->dt = hp->cfl_fac*hp->dx/alpha_max;
+		hp->dt = 0.0001; 
 		if(hp->time + hp->dt > tstop) {
 			hp->dt = tstop - hp->time;
 			done = 1;
@@ -344,7 +345,7 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 		if(hp->output_callback && hp->step%output_every == 0)
 			hp->output_callback(hp);
 
-#if 1
+#if 0 
 		// Solve the approximate Riemann problem for fluxes
 		// solve in all three axis directsions for 0.5*dt, 
 		// TODO: replace Strang splitting with a general
@@ -375,11 +376,8 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 		// update radiation, using just enough steps to avoid
 		// violating the CFL condition for radiation
 		real dtrad = hp->cfl_fac*hp->dx/CLIGHT;
-
-		dtrad *= 10;
-
-
-		int nrstep = ceil(hp->dt/dtrad);
+		//int nrstep = ceil(hp->dt/dtrad);
+		int nrstep = 1;
 		dtrad = hp->dt/nrstep;
 		for(i = 0; i < nrstep; ++i)
 			update_radiation(dtrad, hp);
@@ -387,7 +385,7 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 		// update the Lagrange mesh
 		//update_lagrange_mesh(dt, hp);
 
-#if 1
+#if 0
 		// solve in all three axis directions for 0.5*dt, 
 		// but in the reverse order
 		for(iterax = hp->dim-1; iterax >= 0; --iterax) {

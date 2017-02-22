@@ -63,9 +63,10 @@ def _default_plots(self, fsz=8):
     if self.dim == 1:
         self.fig, ax = plt.subplots(4, 1, figsize=(fsz, fsz), sharex=True)
     if self.dim == 2:
-        self.fig, ax = plt.subplots(1, 3, figsize=(3*fsz, fsz))
+        self.fig, ax = plt.subplots(1, 2, figsize=(2*fsz, fsz))
     if self.dim == 3:
         self.fig, ax = plt.subplots(1, 3, figsize=(3*fsz, fsz))
+    self.fig.subplots_adjust(wspace=0.5)
     if self.dim == 1:
         #if hasattr(self, 'fig'):
             #ax = self.fig.get_axes()
@@ -105,42 +106,72 @@ def _default_plots(self, fsz=8):
 
         #ax[0].imshow(np.log10(radsymm), **imargs)
         #print np.min(1.0-radsymm[radsymm > 0]), np.max(1.0-radsymm)
-        ax[0].imshow(rho, **imargs)
+        #rhoim = ax[0].imshow(rho, **imargs)
         #ax[0].tripcolor(triang, self.npverts['rho'], shading='gouraud', cmap=plt.cm.RdBu_r)
         #ax[0].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
+        #ax[0].set_ylabel(r'$y$')
+        #ax[0].set_xlabel(r'$x$')
+        #ax[0].set_xlim(0, 1)
+        #ax[0].set_ylim(0, 1)
+        #ax[0].set_title('Matter Density')
+
+        #cax = self.fig.add_axes([ax[0].get_position().x1+0.002, 0.21, 0.01, 0.58])
+        #self.fig.colorbar(rhoim, cax=cax)
+
+        #ax[1].imshow(np.log10(0.0000001+radsymm[self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+        rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+        #ax[1].imshow(vel, **imargs)
+        #ax[1].tripcolor(triang, self.npverts['vel'][:,0], shading='gouraud', cmap=plt.cm.RdBu_r)
+        #ax[1].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
         ax[0].set_ylabel(r'$y$')
         ax[0].set_xlabel(r'$x$')
         ax[0].set_xlim(0, 1)
         ax[0].set_ylim(0, 1)
-        ax[0].set_title('Matter density')
-
-        radsymm = 0.25*(self.pyradgrid['E'] + np.roll(self.pyradgrid['E'][::-1,:], 1, axis=0) + np.roll(self.pyradgrid['E'][:,::-1], 1, axis=1) +
-            np.roll(np.roll(self.pyradgrid['E'][::-1,::-1], 1, axis=0), 1, axis=1))
-        #ax[1].imshow(np.log10(0.0000001+radsymm[self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
-        ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
-        #ax[1].imshow(vel, **imargs)
-        #ax[1].tripcolor(triang, self.npverts['vel'][:,0], shading='gouraud', cmap=plt.cm.RdBu_r)
-        #ax[1].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
-        ax[1].set_ylabel(r'$y$')
-        ax[1].set_xlabel(r'$x$')
-        ax[1].set_xlim(0, 1)
-        ax[1].set_ylim(0, 1)
         #ax[1].set_title('velocity (x)')
-        ax[1].set_title('radiation flux')
+        ax[0].set_title('$\log{[E_\mathrm{rad}]}$')
+        #self.fig.colorbar(rhorad)
 
-        ax[2].imshow(p, **imargs)
+        cax = self.fig.add_axes([ax[0].get_position().x1+0.002, 0.21, 0.01, 0.58])
+        self.fig.colorbar(rhorad, cax=cax)
+
+        # check isotropy
+        ipts = np.mgrid[:self.nx[0],:self.nx[1]].T
+        r2 = self.dx*self.dx*((ipts[:,:,0]-self.nx[0]/2)**2+(ipts[:,:,1]-self.nx[1]/2)**2)
+
+        myr = np.linspace(10.0**-2.6, 0.8, 100)
+        #ax[1].plot(myr, 0.0*np.ones_like(myr), 'k--', label='$1/r$')
+
+
+        etot = self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]
+        ax[1].semilogy(1.0/self.dx*(r2.flatten())**0.5,
+                np.abs(1.0-etot.flatten()*(r2.flatten())**0.5*(2*np.pi*1000)),'r.', label='$E_\mathrm{rad}$', markersize=2)
+        #ax[1].set_ylim(-0.001, 0.001)
+
+       
+        #ax[1].legend(loc='lower left')
+        ax[1].set_xlabel(r'$r/\Delta x$')
+        ax[1].set_ylabel(r'$|\epsilon|$')
+        ax[1].set_title('$\epsilon = 1.0 - {E_\mathrm{rad} / (P_\mathrm{src}/(2 \pi r c)})$')
+        ax[1].set_aspect(.5)
+
+
+
+        #imp = ax[2].imshow(p, **imargs)
         #ax[2].tripcolor(triang, self.npverts['etot'], shading='gouraud', cmap=plt.cm.RdBu_r)
         #ax[2].tripcolor(triang, np.sum()self.npverts['rho'][self.nptets['verts']], shading='gouraud', cmap=plt.cm.RdBu_r)
         #ax[2].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
-        ax[2].set_ylabel(r'$y$')
-        ax[2].set_xlabel(r'$x$')
-        ax[2].set_title('pressure')
-        ax[2].set_xlim(0, 1)
-        ax[2].set_ylim(0, 1)
+        #ax[2].set_ylabel(r'$y$')
+        #ax[2].set_xlabel(r'$x$')
+        #ax[2].set_title('Pressure')
+        #ax[2].set_xlim(0, 1)
+        #ax[2].set_ylim(0, 1)
         #ax[2].set_title('etot')
         #ax[2].set_title('mass error')
         #print "rhomin =", np.min(self.npverts['rho'])
         #print "rhomax =", np.max(self.npverts['rho'])
+
+        #cax = self.fig.add_axes([ax[1].get_position().x1+0.002, 0.21, 0.01, 0.58])
+        #self.fig.colorbar(imp, cax=cax)
 
         #ax[3].scatter(xmean[:,:,0], xmean[:,:,1], c=rho, s = 4, lw = 0)
         #ax[3].set_aspect('equal')
@@ -163,9 +194,19 @@ def _default_plots(self, fsz=8):
         from matplotlib.collections import PatchCollection
         #print self.pyrad
 
-        #allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], ray['angle_id']*360./128, \
-                #(ray['angle_id']+1)*360./128, width=(ray['rmax']-ray['rmin']), alpha = ray['N']) for ray in self.pyrad[:self.nrays]]
-        #ax[1].add_collection(PatchCollection(allrays, lw = 1, facecolor='white', alpha = 0.09))
+        rayptr = self.pyrad[:self.nrays]
+        quad = (rayptr['angle_id']>>24)&0xFF
+        rlvl = (rayptr['angle_id']>>16)&0xFF
+        qid = (rayptr['angle_id']&0xFFFF)
+        thmin = 360.0*qid/(2**(rlvl+self.dim))
+        thmax = 360.0*(qid+1)/(2**(rlvl+self.dim))
+
+        #thmin[quad==1] = -thmin[quad==1]+180
+        #thmax[quad==1] = -thmax[quad==1]+180
+        allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], tn, \
+                tx, width=(ray['rmax']-ray['rmin'])) for ray, tn, tx in zip(rayptr[quad==0],
+                    thmin[quad==0], thmax[quad==0])]
+        ax[0].add_collection(PatchCollection(allrays, lw = 1, facecolor='white', alpha = 0.09))
 
         # verticies by subtracting random offsets from those center-points
         #numpoly, numverts = 100, 4
