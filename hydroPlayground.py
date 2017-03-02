@@ -24,6 +24,14 @@ matplotlib.rcParams['grid.linewidth'] = 1.5
 _path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 _hp = ctypes.CDLL('%s/hydroplay.so'%_path)
 
+beam_verts_2d = np.array([ [ [ 1.0 , 0.0 ], [ 0.707106781187 , 0.707106781187 ], ], [ [
+    0.707106781187 , 0.707106781187 ], [ 0.0 , 1.0 ], ], [ [ -1.0 , -0.0 ], [ -0.707106781187 ,
+        0.707106781187 ], ], [ [ 0.0 , 1.0 ], [ -0.707106781187 , 0.707106781187 ], ], [ [
+            0.707106781187 , -0.707106781187 ], [ 1.0 , 0.0 ], ], [ [ 0.707106781187 ,
+                -0.707106781187 ], [ -0.0 , -1.0 ], ], [ [ -0.707106781187 , -0.707106781187 ], [
+                    -1.0 , -0.0 ], ], [ [ -0.0 , -1.0 ], [ -0.707106781187 , -0.707106781187 ], ],
+                ])
+
 # TODO: add EOS C functions or something 
 # default (Sod shock tube in 1D)
 # TODO: Figure out where the rho/etot scaling went wrong?? 
@@ -195,18 +203,16 @@ def _default_plots(self, fsz=8):
         #print self.pyrad
 
         rayptr = self.pyrad[:self.nrays]
-        quad = (rayptr['angle_id']>>24)&0xFF
-        rlvl = (rayptr['angle_id']>>16)&0xFF
-        qid = (rayptr['angle_id']&0xFFFF)
-        thmin = 360.0*qid/(2**(rlvl+self.dim))
-        thmax = 360.0*(qid+1)/(2**(rlvl+self.dim))
+        baseid = (rayptr['angle_id']>>24)&0xFF
+        verts = beam_verts_2d[baseid]
+        thmin = np.arctan2(verts[:,0,1], verts[:,0,0])*180./np.pi
+        thmax = np.arctan2(verts[:,1,1], verts[:,1,0])*180./np.pi
 
         #thmin[quad==1] = -thmin[quad==1]+180
         #thmax[quad==1] = -thmax[quad==1]+180
         allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], tn, \
-                tx, width=(ray['rmax']-ray['rmin'])) for ray, tn, tx in zip(rayptr[quad==0],
-                    thmin[quad==0], thmax[quad==0])]
-        ax[0].add_collection(PatchCollection(allrays, lw = 1, facecolor='white', alpha = 0.09))
+                tx, width=(ray['rmax']-ray['rmin'])) for ray, tn, tx in zip(rayptr, thmin, thmax)]
+        #ax[0].add_collection(PatchCollection(allrays, lw = 0.1, facecolor=(1,1,1,1.0), alpha = 1.0))
 
         # verticies by subtracting random offsets from those center-points
         #numpoly, numverts = 100, 4

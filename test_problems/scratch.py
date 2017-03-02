@@ -22,10 +22,10 @@ def init_grid(grid):
     #grid['rho'][N/2-10+2:N/2+10+2,N/2+20:N/2+40] = 10
 
     # add some blobbiness
-    #for sample in np.random.randint(0, high=N, size=(80, dim)):
-        #grid['rho'][tuple(sample)] = 10.0 
-    #gaussian_filter(grid['rho'], 0.01*N, output=grid['rho'], mode='reflect')
-    #gaussian_filter(grid['etot'], 0.01*N, output=grid['etot'], mode='reflect')
+    for sample in np.random.randint(0, high=N, size=(80, dim)):
+        grid['rho'][tuple(sample)] = 10.0 
+    gaussian_filter(grid['rho'], 0.01*N, output=grid['rho'], mode='reflect')
+    gaussian_filter(grid['etot'], 0.01*N, output=grid['etot'], mode='reflect')
     
     # large internal energy at the center cell for a blast wave
     #grid['etot'][dim*(N/2,)] *= 1000
@@ -48,5 +48,5 @@ hydroprob = hp.HydroProblem(params_dict=params)
 
 # run in user-specified time chunks. Nice for plotting and dumping output!
 for i in xrange(200):
-    hydroprob.run(tstop=0.1, max_steps=10, output_every=50)
+    hydroprob.run(tstop=0.1, max_steps=1, output_every=50)
     hydroprob.plot()
