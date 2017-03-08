@@ -32,8 +32,9 @@ typedef struct {
 
 void get_beam_poly(hydro_ray ray, solid_angle_poly* poly, dvec* ibox, dvec* nbox, dvec* charloop, hydro_problem* hp) {
 
+	real len;
 	rvec rbox[2];
-	int v, ax, baseid, reflvl, refbits, quadrant;
+	int v, i, ax, baseid, reflvl, refbits, quadrant;
 	unpack_id_bits(ray.angle_id, baseid, reflvl, refbits);
 
 	// dimension-specific things, loop directions to follow characteristics,
@@ -44,6 +45,14 @@ void get_beam_poly(hydro_ray ray, solid_angle_poly* poly, dvec* ibox, dvec* nbox
 		for(v = 0; v < hp->dim; ++v)
 		for(ax = 0; ax < hp->dim; ++ax)
 			poly->verts[v].pos[ax] = base_beams_2d[baseid%2][v][ax];
+		for(i = 0; i < reflvl; ++i) { // refine the ray
+			v = (refbits>>i)&1;
+			for(ax = 0; ax < hp->dim; ++ax)
+				poly->verts[v].pos[ax] = 0.5*(poly->verts[0].pos[ax]+poly->verts[1].pos[ax]);
+			len = sqrt(poly->verts[v].pos[0]*poly->verts[v].pos[0]+poly->verts[v].pos[1]*poly->verts[v].pos[1]); 
+			for(ax = 0; ax < hp->dim; ++ax)
+				poly->verts[v].pos[ax] /= len; 
+		}
 	}
 	else if(hp->dim == 3) {
 		quadrant = baseid/6; // six base rays per octant
@@ -55,6 +64,7 @@ void get_beam_poly(hydro_ray ray, solid_angle_poly* poly, dvec* ibox, dvec* nbox
 		printf("Dimension must be 2 or 3!\n");
 		exit(0);
 	}
+
 
 	// get the loop directions such that we always move along characteristics
 	// calculate the bounding box 
@@ -251,7 +261,7 @@ void clip_beam_poly(solid_angle_poly* poly, face_info* faces, real *domega, hydr
 
 void update_radiation(real dt, hydro_problem* hp) {
 
-	int i, v, r, rminbits, rmaxbits, fin, fout,
+	int i, v, r, rminbits, rmaxbits, fin, fout, ornrays, refine, baseid, reflvl, refbits,
 		flatind, ii, jj, quadrant, qid, rlvl, f, nbase;
 	dvec lsgn, grind, ibox[2], nbox;
 	real ray_mom_out, fmom_in, domega_in, domega_out, intensity_in, 
@@ -277,48 +287,35 @@ void update_radiation(real dt, hydro_problem* hp) {
 #define subfmom(t0, t1, thmin, thmax, fc, fm) (0.5*(th0+th1)*subflux(t0, t1, thmin, thmax, fc, fm))
 
 
-	if(hp->dim != 2) {
-		printf("2D radiation only for now!\n");
-		exit(0);
-	}
+	//if(hp->dim != 2) {
+		//printf("2D radiation only for now!\n");
+		//exit(0);
+	//}
 
 	// STEP 1: step all existing rays forward and refine if needed
-	int ornrays = hp->nrays;
+	ornrays = hp->nrays;
 	for(r = 0; r < ornrays; ++r) {
 		ray = hp->rays[r];
 		ray.rmin += CLIGHT*dt;
 		ray.rmax += CLIGHT*dt;
-		hp->rays[r] = ray;
-
-		// no refinement for now...
-
-#if 0
-		unpack_id_bits(idbits, baseid, reflvl, refbits);
-		quadrant = ;
-		
-		// TODO: can test the criterion by using the reflvl,
-		// no need to compute the thetas!
-		thmin = (TWO_PI*qid)/(1<<(hp->dim+rlvl));
-		thmax = (TWO_PI*(qid+1))/(1<<(hp->dim+rlvl));
-		if(ray.rmax*(thmax-thmin) > 20*hp->dx) {
+		unpack_id_bits(ray.angle_id, baseid, reflvl, refbits);
+		refine = (ray.rmax*(0.125*TWO_PI/(1<<reflvl)) > 4*hp->dx);
+		if(refine) {
 			r0 = ray; r1 = ray;
-			r0.Ftot = subflux(thmin, 0.5*(thmin+thmax), thmin, thmax, ray.Ftot, ray.Fcom); 
-			r1.Ftot = subflux(0.5*(thmin+thmax), thmax, thmin, thmax, ray.Ftot, ray.Fcom); 
-			r0.Fcom = subfmom(thmin, 0.5*(thmin+thmax), thmin, thmax, ray.Ftot, ray.Fcom); 
-			r1.Fcom = subfmom(0.5*(thmin+thmax), thmax, thmin, thmax, ray.Ftot, ray.Fcom); 
-			r0.angle_id = quadrant<<24; // set the quadrant (highest byte)
-			r0.angle_id |= (rlvl+1)<<16; // set the refinement level
-			r0.angle_id |= (qid<<1); // set the ray id (lowest two bytes) 
-			r1.angle_id = quadrant<<24; 
-			r1.angle_id |= (rlvl+1)<<16;
-			r1.angle_id |= (qid<<1)+1; 
+			r0.Ftot *= 0.5; 
+			r1.Ftot *= 0.5;
+			r0.angle_id = baseid<<24; // set the base ray ID 
+			r0.angle_id |= (reflvl+1)<<20; // set the refinement level
+			r0.angle_id |= refbits|(0<<reflvl); // set the refinement bits 
+			r1.angle_id = baseid<<24; 
+			r1.angle_id |= (reflvl+1)<<20;
+			r1.angle_id |= refbits|(1<<reflvl);
 			hp->rays[r] = r0;
 			hp->rays[hp->nrays++] = r1;
 		}
 		else {
 			hp->rays[r] = ray;
 		}
-#endif
 	}
 
 	// STEP 2: source new rays 
@@ -346,6 +343,10 @@ void update_radiation(real dt, hydro_problem* hp) {
 		// this works because we work in one single dummy quadrant
 		ray = hp->rays[r];
 		get_beam_poly(ray, &beam_poly, ibox, &nbox, &lsgn, hp);
+		unpack_id_bits(ray.angle_id, baseid, reflvl, refbits);
+
+		printf("Beam %d poly: %f %f %f, %f %f %f, %f %f %f\n", r, beam_poly.verts[0].pos[0], beam_poly.verts[0].pos[1], beam_poly.verts[0].pos[2], beam_poly.verts[1].pos[0], beam_poly.verts[1].pos[1], beam_poly.verts[1].pos[2], beam_poly.verts[2].pos[0], beam_poly.verts[2].pos[1], beam_poly.verts[2].pos[2]);
+		printf("  Total flux = %.5e, solid angle = %.5e\n", ray.Ftot, 0);
 
 		// Hacky BCs. TODO: Figure this out better
 		if(ibox[0][0] + ray.orcell[0] >= hp->nx[0]+1) continue; 
@@ -372,6 +373,11 @@ void update_radiation(real dt, hydro_problem* hp) {
 		ray_mom_out = 0.0;
 		for(ii = 0; ii < nbox[0]; ++ii)
 		for(jj = 0; jj < nbox[1]; ++jj) {
+
+			if(ii >= hp->nx[0])  continue; 
+			if(jj >= hp->nx[1])  continue; 
+
+
 			grind[0] = lsgn[0]*(ibox[0][0] + ii) + ray.orcell[0];
 			grind[1] = lsgn[1]*(ibox[0][1] + jj) + ray.orcell[1];
 			x0[0] = hp->dx*(ibox[0][0]+ii-0.5);
@@ -532,7 +538,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 				// and get the intensity
 				// TODO: numerical stability??
 				if(fin == hp->dim) 
-					voxdata[ii][jj].flux_in[fin] = ray.Ftot*domega_in/(TWO_PI*0.125);
+					voxdata[ii][jj].flux_in[fin] = ray.Ftot*domega_in*(1<<reflvl)/(TWO_PI*0.125);
 				intensity_in = voxdata[ii][jj].flux_in[fin]/domega_in;
 
 				for(fout = 0; fout <= hp->dim; ++fout) {
@@ -555,6 +561,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 					if(fin == 0) r_in = x0[0]*secthmid; // x-facing faces
 					else if(fin == 1) r_in = x0[1]*cscthmid; // y-facing faces
 					else if(fin == hp->dim) r_in = ray.rmin; // incoming ray front 
+					if(rminbits == 0xFF) r_in = 0.0; // TODO: why is this needed??
 					if(fout == 0) r_out = (x0[0]+hp->dx)*secthmid;
 					else if(fout == 1) r_out = (x0[1]+hp->dx)*cscthmid;
 					else if(fout == hp->dim) r_out = ray.rmax; //outgoing ray front 
@@ -573,6 +580,14 @@ void update_radiation(real dt, hydro_problem* hp) {
 						// update hydro terms by conserving the difference
 						// between downwind and upwind fluxes
 						hp->grid[flatind].etot += fmid_in-fmid_out; 
+
+						if(fmid_in-fmid_out < 0.0) {
+							printf("Flux out is greater than flux in! cell %d %d, r_in = %.5e, r_out = %.5e\n", ii, jj, r_in, r_out);
+							printf(" fin = %d, fout = %d, ray.rmin = %.5e\n", fin, fout, ray.rmin);
+						
+						}
+
+
 						//hp->grid[flatind].mom[0] += lsgn[0]*cos(thmid)*(fmid_in-fmid_out)/CLIGHT; // TODO: review this!
 						//hp->grid[flatind].mom[1] += lsgn[1]*sin(thmid)*(fmid_in-fmid_out)/CLIGHT; 
 					}

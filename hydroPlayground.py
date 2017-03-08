@@ -162,6 +162,13 @@ def _default_plots(self, fsz=8):
         ax[1].set_title('$\epsilon = 1.0 - {E_\mathrm{rad} / (P_\mathrm{src}/(2 \pi r c)})$')
         ax[1].set_aspect(.5)
 
+        print self.pyradgrid['E'][self.nx[0]/2,self.nx[1]/2] 
+        print self.pyradgrid['E'][self.nx[0]/2-1,self.nx[1]/2-1] 
+        print self.pyradgrid['E'][self.nx[0]/2+1,self.nx[1]/2+1] 
+        print self.pyradgrid['E'][self.nx[0]/2+2,self.nx[1]/2+2] 
+
+        print np.min(self.pyradgrid['E']), np.max(self.pyradgrid['E'])
+
 
 
         #imp = ax[2].imshow(p, **imargs)
