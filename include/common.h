@@ -67,7 +67,8 @@ typedef struct {
 typedef struct {
 	long angle_id;
 	real rmin, rmax; // the inner and outer radius for the timestep 
-	dvec orcell; // the originating cell index
+	//rvec origin; // the source location 
+	dvec orcell; // the source location 
 	real Ftot, Fcom;	
 } hydro_ray;
 

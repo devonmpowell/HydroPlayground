@@ -73,7 +73,7 @@ def _default_plots(self, fsz=8):
     if self.dim == 2:
         self.fig, ax = plt.subplots(1, 2, figsize=(2*fsz, fsz))
     if self.dim == 3:
-        self.fig, ax = plt.subplots(1, 3, figsize=(3*fsz, fsz))
+        self.fig, ax = plt.subplots(1, 4, figsize=(4*fsz, fsz))
     self.fig.subplots_adjust(wspace=0.5)
     if self.dim == 1:
         #if hasattr(self, 'fig'):
@@ -211,14 +211,14 @@ def _default_plots(self, fsz=8):
 
         rayptr = self.pyrad[:self.nrays]
         baseid = (rayptr['angle_id']>>24)&0xFF
-        verts = beam_verts_2d[baseid]
-        thmin = np.arctan2(verts[:,0,1], verts[:,0,0])*180./np.pi
-        thmax = np.arctan2(verts[:,1,1], verts[:,1,0])*180./np.pi
+        #verts = beam_verts_2d[baseid]
+        #thmin = np.arctan2(verts[:,0,1], verts[:,0,0])*180./np.pi
+        #thmax = np.arctan2(verts[:,1,1], verts[:,1,0])*180./np.pi
 
         #thmin[quad==1] = -thmin[quad==1]+180
         #thmax[quad==1] = -thmax[quad==1]+180
-        allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], tn, \
-                tx, width=(ray['rmax']-ray['rmin'])) for ray, tn, tx in zip(rayptr, thmin, thmax)]
+        #allrays = [Wedge(self.dx*(0.5+ray['orcell'][:2]), ray['rmax'], tn, \
+                #tx, width=(ray['rmax']-ray['rmin'])) for ray, tn, tx in zip(rayptr, thmin, thmax)]
         #ax[0].add_collection(PatchCollection(allrays, lw = 0.1, facecolor=(1,1,1,1.0), alpha = 1.0))
 
         # verticies by subtracting random offsets from those center-points
@@ -241,22 +241,98 @@ def _default_plots(self, fsz=8):
         #if hasattr(self, 'fig'):
             #ax = self.fig.get_axes()
         #else:
-        plt.show()
+        #plt.show()
 
-        ax[0].imshow(rho[:,:,32], **imargs)
+        #ax[0].imshow(rho[:,:,32], **imargs)
+        #ax[0].set_ylabel(r'$y$')
+        #ax[0].set_xlabel(r'$x$')
+        #ax[0].set_title('rho')
+
+        #ax[1].imshow(vel[:,:,32], **imargs)
+        #ax[1].set_ylabel(r'$y$')
+        #ax[1].set_xlabel(r'$x$')
+        #ax[1].set_title('vel')
+
+        #ax[2].imshow(p[:,:,32], **imargs)
+        #ax[2].set_ylabel(r'$y$')
+        #ax[2].set_xlabel(r'$x$')
+        #ax[2].set_title('pressure')
+        imargs = {'interpolation': 'nearest', 'origin': 'lower', 'extent': [0,1,0,1], 'cmap':
+                plt.cm.RdBu_r}
+        rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nx[2]/2]), **imargs)
+
+
+        #cax = self.fig.add_axes([ax[0].get_position().x1, 0.31, 0.01, 0.48])
+        #self.fig.colorbar(rhorad, cax=cax)
+
+        rhorad = ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nx[1]/2,self.nghosts:-self.nghosts]), **imargs)
+        rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][(7*self.nx[0])/8,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+
+
+        #ax[1].imshow(vel, **imargs)
+        #ax[1].tripcolor(triang, self.npverts['vel'][:,0], shading='gouraud', cmap=plt.cm.RdBu_r)
+        #ax[1].triplot(triang, lw=0.2, c='k', markersize=0, marker=None)
         ax[0].set_ylabel(r'$y$')
         ax[0].set_xlabel(r'$x$')
-        ax[0].set_title('rho')
+        ax[0].set_xlim(0, 1)
+        ax[0].set_ylim(0, 1)
+        ax[0].set_title('$\log{[E_\mathrm{rad}]}, z = 0$')
 
-        ax[1].imshow(vel[:,:,32], **imargs)
         ax[1].set_ylabel(r'$y$')
         ax[1].set_xlabel(r'$x$')
-        ax[1].set_title('vel')
+        ax[1].set_xlim(0, 1)
+        ax[1].set_ylim(0, 1)
+        ax[1].set_title('$\log{[E_\mathrm{rad}]}, y = 0$')
 
-        ax[2].imshow(p[:,:,32], **imargs)
         ax[2].set_ylabel(r'$y$')
         ax[2].set_xlabel(r'$x$')
-        ax[2].set_title('pressure')
+        ax[2].set_xlim(0, 1)
+        ax[2].set_ylim(0, 1)
+        ax[2].set_title('$\log{[E_\mathrm{rad}]}, x = 112 \Delta x$')
+
+
+        # check isotropy
+        ipts = np.mgrid[:self.nx[0],:self.nx[1],:self.nx[2]].T
+        r2 = self.dx*self.dx*((ipts[:,:,:,0]-self.nx[0]/2)**2+(ipts[:,:,:,1]-self.nx[1]/2)**2+(ipts[:,:,:,2]-self.nx[2]/2)**2)
+
+        #myr = np.linspace(np.min(r2)**0.5, np.max(r2)**0.5, 100)
+        #ax[3].plot(myr, 1.0*np.ones_like(myr), 'k--', label='$1/r$')
+
+
+        etot = self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]
+
+
+        print etot.shape, r2.shape, self.nx[0], self.nx[1], self.nx[2]
+        #print etot
+
+        ax[3].semilogy(1.0/self.dx*(r2.flatten())**0.5,
+                np.abs(1.0-etot.flatten()*r2.flatten()*(4*np.pi*1000)/self.dx),'r.', label='$E_\mathrm{rad}$', markersize=2)
+        #print np.mean(etot.flatten()*r2.flatten()*(4*np.pi*1000))
+        ax[3].set_ylim(0.0000001, 1.0)
+        ax[3].set_xlim(0.0, 32.0)
+
+        ax[3].set_xlabel(r'$r/\Delta x$')
+        ax[3].set_ylabel(r'$|\epsilon|$')
+        ax[3].set_title('$\epsilon = 1.0 - {E_\mathrm{rad} / (P_\mathrm{src}/(4 \pi r^2 c)})$')
+        #ax[3].set_aspect(.5)
+
+       
+        #ax[1].legend(loc='lower left')
+        #ax[1].set_xlabel(r'$r/\Delta x$')
+        #ax[1].set_ylabel(r'$|\epsilon|$')
+        #ax[1].set_title('$\epsilon = 1.0 - {E_\mathrm{rad} / (P_\mathrm{src}/(2 \pi r c)})$')
+        #ax[1].set_aspect(.5)
+
+        #print self.pyradgrid['E'][self.nx[0]/2,self.nx[1]/2] 
+        #print self.pyradgrid['E'][self.nx[0]/2-1,self.nx[1]/2-1] 
+        #print self.pyradgrid['E'][self.nx[0]/2+1,self.nx[1]/2+1] 
+        #print self.pyradgrid['E'][self.nx[0]/2+2,self.nx[1]/2+2] 
+
+        #print np.min(self.pyradgrid['E']), np.max(self.pyradgrid['E'])
+
+
+
+
 
     #print 'delta cm [ %f , %f]' % (np.min(dcm), np.max(dcm))
     plt.show()

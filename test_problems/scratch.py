@@ -7,22 +7,22 @@ sys.path.insert(0, '.')
 import hydroPlayground as hp
 
 # global stuff
-N = 128
+N = 64 #128
 L = 1.0
-dim = 2
+dim = 3
 
 # used to initialize the grid cells
 def init_grid(grid):
 
     # set the flat background field
-    grid['rho'] = 0.001 
+    grid['rho'] = 0.00001 
     grid['mom'] = 0.0 
     grid['etot'] = 1.0 
 
     #grid['rho'][N/2-10+2:N/2+10+2,N/2+20:N/2+40] = 10
 
     # add some blobbiness
-    for sample in np.random.randint(0, high=N, size=(80, dim)):
+    for sample in np.random.randint(0, high=N, size=(1000, dim)):
         grid['rho'][tuple(sample)] = 10.0 
     gaussian_filter(grid['rho'], 0.01*N, output=grid['rho'], mode='reflect')
     gaussian_filter(grid['etot'], 0.01*N, output=grid['etot'], mode='reflect')
