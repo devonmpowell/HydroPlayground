@@ -126,6 +126,7 @@ def _default_plots(self, fsz=8):
         #cax = self.fig.add_axes([ax[0].get_position().x1+0.002, 0.21, 0.01, 0.58])
         #self.fig.colorbar(rhoim, cax=cax)
 
+
         #ax[1].imshow(np.log10(0.0000001+radsymm[self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
         rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
         #ax[1].imshow(vel, **imargs)
@@ -238,6 +239,8 @@ def _default_plots(self, fsz=8):
     if self.dim == 3:
         imargs = {'interpolation': 'nearest', 'origin': 'lower'}
 
+        print np.min(self.pyradgrid['E']), np.max(self.pyradgrid['E']), np.sum(self.pyradgrid['E'])
+
         #if hasattr(self, 'fig'):
             #ax = self.fig.get_axes()
         #else:
@@ -259,14 +262,16 @@ def _default_plots(self, fsz=8):
         #ax[2].set_title('pressure')
         imargs = {'interpolation': 'nearest', 'origin': 'lower', 'extent': [0,1,0,1], 'cmap':
                 plt.cm.RdBu_r}
-        rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nx[2]/2]), **imargs)
-
 
         #cax = self.fig.add_axes([ax[0].get_position().x1, 0.31, 0.01, 0.48])
         #self.fig.colorbar(rhorad, cax=cax)
-
+        rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nx[2]/2]), **imargs)
         rhorad = ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nx[1]/2,self.nghosts:-self.nghosts]), **imargs)
-        rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][(7*self.nx[0])/8,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+        rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][(5*self.nx[0])/8,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+
+        #rhorad = ax[0].imshow(np.log10(np.sum(self.pyradgrid['E'][:,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts], axis=0)), **imargs)
+        #rhorad = ax[1].imshow(np.log10(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,:,self.nghosts:-self.nghosts], axis=1)), **imargs)
+        #rhorad = ax[2].imshow(np.log10(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,:], axis=2)), **imargs)
 
 
         #ax[1].imshow(vel, **imargs)
@@ -306,10 +311,10 @@ def _default_plots(self, fsz=8):
         #print etot
 
         ax[3].semilogy(1.0/self.dx*(r2.flatten())**0.5,
-                np.abs(1.0-etot.flatten()*r2.flatten()*(4*np.pi*1000)/self.dx),'r.', label='$E_\mathrm{rad}$', markersize=2)
+                np.abs(1.0-etot.flatten()*(4*np.pi*1000*r2.flatten())/self.dx),'r.', label='$E_\mathrm{rad}$', markersize=2)
         #print np.mean(etot.flatten()*r2.flatten()*(4*np.pi*1000))
-        ax[3].set_ylim(0.0000001, 1.0)
-        ax[3].set_xlim(0.0, 32.0)
+        #ax[3].set_ylim(0.0000001, 1.0)
+        #ax[3].set_xlim(0.0, 32.0)
 
         ax[3].set_xlabel(r'$r/\Delta x$')
         ax[3].set_ylabel(r'$|\epsilon|$')

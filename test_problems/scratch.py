@@ -7,7 +7,7 @@ sys.path.insert(0, '.')
 import hydroPlayground as hp
 
 # global stuff
-N = 64 #128
+N = 32
 L = 1.0
 dim = 3
 

@@ -11,8 +11,8 @@
 
 
 # Source files
-SOURCES = src/driver.c src/eos.c src/radiation.c src/cg_rc.c src/cg_rc_prb.c src/csparse.c
-COMMON = include/common.h include/eos.h include/cg_rc.h include/csparse.h Makefile hydroPlayground.py 
+SOURCES = src/driver.c src/eos.c src/radiation.c src/geometry.c
+COMMON = include/common.h include/eos.h include/geometry.h Makefile hydroPlayground.py 
 LIBOUT = hydroplay.so 
 
 # compiler options

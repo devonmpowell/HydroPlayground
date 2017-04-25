@@ -15,6 +15,7 @@
 #include <math.h>
 
 #include "common.h"
+#include "geometry.h"
 
 #define unpack_id_bits(idbits, baseid, reflvl, refbits) { \
 	baseid = (ray.angle_id>>24)&0xFF; \
@@ -22,25 +23,25 @@
 	refbits =  (ray.angle_id)&0xFFFFF; \
 }
 
-#define dot2(va, vb) (va[0]*vb[0] + va[1]*vb[1])
-#define cross2(va, vb) (va[0]*vb[1]-va[1]*vb[0])
+#define dot2(va, vb) (va[0]*vb[0] + va.y*vb.y)
+#define cross2(va, vb) (va.x*vb.y-va.y*vb.x)
 #define wav2(va, wa, vb, wb, vr) {			\
-	vr[0] = (wa*va[0] + wb*vb[0])/(wa + wb);	\
-	vr[1] = (wa*va[1] + wb*vb[1])/(wa + wb);	\
+	vr.x = (wa*va.x + wb*vb.x)/(wa + wb);	\
+	vr.y = (wa*va.y + wb*vb.y)/(wa + wb);	\
 }
 
 #define wav3(va, wa, vb, wb, vr) {			\
-	vr[0] = (wa*va[0] + wb*vb[0])/(wa + wb);	\
-	vr[1] = (wa*va[1] + wb*vb[1])/(wa + wb);	\
-	vr[2] = (wa*va[2] + wb*vb[2])/(wa + wb);	\
+	vr.x = (wa*va.x + wb*vb.x)/(wa + wb);	\
+	vr.y = (wa*va.y + wb*vb.y)/(wa + wb);	\
+	vr.z = (wa*va.z + wb*vb.z)/(wa + wb);	\
 }
 
-#define dot3(va, vb) (va[0]*vb[0] + va[1]*vb[1] + va[2]*vb[2])
+#define dot3(va, vb) (va.x*vb.x + va.y*vb.y + va.z*vb.z)
 #define cross3(v,u,w)          /* CROSS Vector Product */              \
 {                                                                       \
-    (v)[0] = (u)[1]*(w)[2] - (u)[2]*(w)[1];                             \
-    (v)[1] = (u)[2]*(w)[0] - (u)[0]*(w)[2];                             \
-    (v)[2] = (u)[0]*(w)[1] - (u)[1]*(w)[0];                             \
+    (v).x = (u).y*(w).z - (u).z*(w).y;                             \
+    (v).y = (u).z*(w).x - (u).x*(w).z;                             \
+    (v).z = (u).x*(w).y - (u).y*(w).x;                             \
 }
 
 
@@ -48,325 +49,160 @@
 real domega3(rvec v1, rvec v2, rvec v3) {
 	int i;
 	real det, div;
-	// Solid angle of a triangle by Oosterom and Strackee
+
 	// Assumes v1, v2, v3 are unit vectors
-	det = v1[0]*(v2[1]*v3[2]-v3[1]*v2[2])-v1[1]*(v2[0]*v3[2]-v3[0]*v2[2])+v1[2]*(v2[0]*v3[1]-v3[0]*v2[1]);
+	div = sqrt(v1.x*v1.x + v1.y*v1.y + v1.z*v1.z);
+	for(i = 0; i < 3; ++i) v1.xyz[i] /= div;
+	div = sqrt(v2.x*v2.x + v2.y*v2.y + v2.z*v2.z);
+	for(i = 0; i < 3; ++i) v2.xyz[i] /= div;
+	div = sqrt(v3.x*v3.x + v3.y*v3.y + v3.z*v3.z);
+	for(i = 0; i < 3; ++i) v3.xyz[i] /= div;
+
+	// Solid angle of a triangle by Oosterom and Strackee
+	det = v1.x*(v2.y*v3.z-v3.y*v2.z)-v1.y*(v2.x*v3.z-v3.x*v2.z)+v1.z*(v2.x*v3.y-v3.x*v2.y);
 	div = 1.0;
 	for(i = 0; i < 3; ++i) {
-		div += v1[i]*v2[i];
-		div += v2[i]*v3[i];
-		div += v3[i]*v1[i];
+		div += v1.xyz[i]*v2.xyz[i];
+		div += v2.xyz[i]*v3.xyz[i];
+		div += v3.xyz[i]*v1.xyz[i];
 	}
 	return 2.0*atan2(det, div);
 } 
 
-typedef struct {
-	struct {
-		rvec pos;
-		dvec pnbrs;
-	} verts[32];
-	int nverts;
-} solid_angle_poly;
 
-void get_beam_poly(hydro_ray ray, solid_angle_poly* poly, dvec* ibox, dvec* nbox, dvec* charloop, hydro_problem* hp) {
+void clip_beam_poly(psi_poly* poly, psi_plane* faces, int nclip, hydro_problem* hp);
+
+void get_beam_poly(hydro_ray ray, psi_poly* poly, dvec* nbox, dvec* charloop, hydro_problem* hp) {
 
 	real len;
 	rvec rbox[2];
 	int v, i, ax, baseid, reflvl, refbits, quadrant;
 	unpack_id_bits(ray.angle_id, baseid, reflvl, refbits);
 
-	// dimension-specific things, loop directions to follow characteristics,
-	// and bounding box calculations for this beam
-	poly->nverts = hp->dim;
-	if(hp->dim == 2) {
-		quadrant = baseid/2; // two base rays per quadrant
-		for(v = 0; v < hp->dim; ++v) {
-			for(ax = 0; ax < hp->dim; ++ax)
-				poly->verts[v].pos[ax] = base_beams_2d[baseid%2][v][ax];
-		}
-		for(i = 0; i < reflvl; ++i) { // refine the ray
-			v = (refbits>>i)&1;
-			for(ax = 0; ax < hp->dim; ++ax)
-				poly->verts[v].pos[ax] = 0.5*(poly->verts[0].pos[ax]+poly->verts[1].pos[ax]);
-			len = sqrt(poly->verts[v].pos[0]*poly->verts[v].pos[0]+poly->verts[v].pos[1]*poly->verts[v].pos[1]); 
-			for(ax = 0; ax < hp->dim; ++ax)
-				poly->verts[v].pos[ax] /= len; 
-		}
+	rvec refined_vertex_pos[4];
+
+	// get the quandrant and the refined beam vertex positions
+	quadrant = baseid/6; 
+	for(v = 0; v < hp->dim; ++v) {
+		for(ax = 0; ax < hp->dim; ++ax)
+			refined_vertex_pos[v].xyz[ax] = base_beams_3d[baseid][v][ax];
 	}
-	else if(hp->dim == 3) {
-		quadrant = baseid/6; // six base rays per octant
-		for(v = 0; v < hp->dim; ++v) {
-			for(ax = 0; ax < hp->dim; ++ax)
-				poly->verts[v].pos[ax] = base_beams_3d[baseid%6][v][ax];
-			poly->verts[v].pnbrs[0] = (v-1+hp->dim)%hp->dim;
-			poly->verts[v].pnbrs[1] = (v+1)%hp->dim;
-		}
-		for(i = 0; i < reflvl; ++i) { // refine the ray
-			v = (refbits>>i)&1;
-			for(ax = 0; ax < hp->dim; ++ax)
-				poly->verts[v].pos[ax] = 0.5*(poly->verts[0].pos[ax]+poly->verts[1].pos[ax]);
-
-
-
-			len = sqrt(poly->verts[v].pos[0]*poly->verts[v].pos[0]
-				+poly->verts[v].pos[1]*poly->verts[v].pos[1]+poly->verts[v].pos[2]*poly->verts[v].pos[2]); 
-			for(ax = 0; ax < hp->dim; ++ax)
-				poly->verts[v].pos[ax] /= len; 
-		}
-	}
-	else {
-		printf("Dimension must be 2 or 3!\n");
-		exit(0);
+	for(i = 0; i < reflvl; ++i) { // refine the ray
+		v = (refbits>>i)&1;
+		for(ax = 0; ax < hp->dim; ++ax)
+			refined_vertex_pos[v].xyz[ax] = 0.5*(refined_vertex_pos[0].xyz[ax]+refined_vertex_pos[1].xyz[ax]);
+		len = sqrt(refined_vertex_pos[v].x*refined_vertex_pos[v].x
+				+ refined_vertex_pos[v].y*refined_vertex_pos[v].y
+				+ refined_vertex_pos[v].z*refined_vertex_pos[v].z);
+		for(ax = 0; ax < hp->dim; ++ax)
+			refined_vertex_pos[v].xyz[ax] /= len; 
 	}
 
+	// fill in the beam vertices 
+	for(ax = 0; ax < hp->dim; ++ax) { 
+		poly->verts[0].pos.xyz[ax] = ray.origin.xyz[ax] + ray.rmin*refined_vertex_pos[0].xyz[ax]; 
+		poly->verts[1].pos.xyz[ax] = ray.origin.xyz[ax] + ray.rmin*refined_vertex_pos[1].xyz[ax]; 
+		poly->verts[2].pos.xyz[ax] = ray.origin.xyz[ax] + ray.rmin*refined_vertex_pos[2].xyz[ax]; 
+		poly->verts[3].pos.xyz[ax] = ray.origin.xyz[ax] + ray.rmax*refined_vertex_pos[0].xyz[ax]; 
+		poly->verts[4].pos.xyz[ax] = ray.origin.xyz[ax] + ray.rmax*refined_vertex_pos[1].xyz[ax]; 
+		poly->verts[5].pos.xyz[ax] = ray.origin.xyz[ax] + ray.rmax*refined_vertex_pos[2].xyz[ax]; 
+	}
+
+	// initialize the connectivity and local basis
+	poly->verts[0].q.xyz[0] = 0.0; 
+	poly->verts[0].q.xyz[1] = 0.0; 
+	poly->verts[0].q.xyz[2] = 0.0; 
+	poly->verts[1].q.xyz[0] = 1.0; 
+	poly->verts[1].q.xyz[1] = 0.0; 
+	poly->verts[1].q.xyz[2] = 0.0; 
+	poly->verts[2].q.xyz[0] = 0.0; 
+	poly->verts[2].q.xyz[1] = 1.0; 
+	poly->verts[2].q.xyz[2] = 0.0; 
+	poly->verts[3].q.xyz[0] = 0.0; 
+	poly->verts[3].q.xyz[1] = 0.0; 
+	poly->verts[3].q.xyz[2] = 1.0; 
+	poly->verts[4].q.xyz[0] = 1.0; 
+	poly->verts[4].q.xyz[1] = 0.0; 
+	poly->verts[4].q.xyz[2] = 1.0; 
+	poly->verts[5].q.xyz[0] = 0.0; 
+	poly->verts[5].q.xyz[1] = 1.0; 
+	poly->verts[5].q.xyz[2] = 1.0; 
+
+	poly->verts[0].flags = 1; 
+	poly->verts[1].flags = 1; 
+	poly->verts[2].flags = 1; 
+
+	poly->verts[0].fnbrs[0] = -1; 
+	poly->verts[0].fnbrs[1] = BEAM_IN; 
+	poly->verts[0].fnbrs[2] = -1; 
+	poly->verts[1].fnbrs[0] = -1; 
+	poly->verts[1].fnbrs[1] = BEAM_IN; 
+	poly->verts[1].fnbrs[2] = -1; 
+	poly->verts[2].fnbrs[0] = -1; 
+	poly->verts[2].fnbrs[1] = BEAM_IN; 
+	poly->verts[2].fnbrs[2] = -1; 
+	poly->verts[3].fnbrs[0] = -1; 
+	poly->verts[3].fnbrs[1] = BEAM_OUT; 
+	poly->verts[3].fnbrs[2] = -1; 
+	poly->verts[4].fnbrs[0] = -1; 
+	poly->verts[4].fnbrs[1] = BEAM_OUT; 
+	poly->verts[4].fnbrs[2] = -1; 
+	poly->verts[5].fnbrs[0] = -1; 
+	poly->verts[5].fnbrs[1] = BEAM_OUT; 
+	poly->verts[5].fnbrs[2] = -1; 
+
+	poly->verts[0].pnbrs[0] = 2; 
+	poly->verts[0].pnbrs[1] = 1; 
+	poly->verts[0].pnbrs[2] = 3; 
+	poly->verts[1].pnbrs[0] = 0; 
+	poly->verts[1].pnbrs[1] = 2; 
+	poly->verts[1].pnbrs[2] = 4; 
+	poly->verts[2].pnbrs[0] = 1; 
+	poly->verts[2].pnbrs[1] = 0; 
+	poly->verts[2].pnbrs[2] = 5; 
+	poly->verts[3].pnbrs[0] = 4; 
+	poly->verts[3].pnbrs[1] = 5; 
+	poly->verts[3].pnbrs[2] = 0; 
+	poly->verts[4].pnbrs[0] = 5; 
+	poly->verts[4].pnbrs[1] = 3; 
+	poly->verts[4].pnbrs[2] = 1; 
+	poly->verts[5].pnbrs[0] = 3; 
+	poly->verts[5].pnbrs[1] = 4; 
+	poly->verts[5].pnbrs[2] = 2; 
 
 	// calculate the bounding box 
 	// get the loop directions such that we always move along characteristics
 	// do it in all three dimensions for looping machinery later on
 	for(ax = 0; ax < 3; ++ax)
-		(*charloop)[ax] = 1-2*((quadrant>>ax)&1);
-	for(ax = 0; ax < 3; ++ax) {
-		rbox[0][ax] = 1.0e30;
-		rbox[1][ax] = -1.0e30;
-		for(v = 0; v < hp->dim+1; ++v) {
-			if(ray.rmin*poly->verts[v].pos[ax] < rbox[0][ax]) rbox[0][ax] = ray.rmin*poly->verts[v].pos[ax];
-			if(ray.rmin*poly->verts[v].pos[ax] > rbox[1][ax]) rbox[1][ax] = ray.rmin*poly->verts[v].pos[ax];
+		(*charloop).ijk[ax] = 1-2*((quadrant>>ax)&1);
+	poly->nverts = 2*hp->dim;
+	for(ax = 0; ax < hp->dim; ++ax) {
+		rbox[0].xyz[ax] = 1.0e30;
+		rbox[1].xyz[ax] = -1.0e30;
+		for(v = 0; v < poly->nverts; ++v) {
+			if(poly->verts[v].pos.xyz[ax] < rbox[0].xyz[ax]) rbox[0].xyz[ax] = poly->verts[v].pos.xyz[ax];
+			if(poly->verts[v].pos.xyz[ax] > rbox[1].xyz[ax]) rbox[1].xyz[ax] = poly->verts[v].pos.xyz[ax];
 		}
-		for(v = 0; v < hp->dim+1; ++v) {
-			if(ray.rmax*poly->verts[v].pos[ax] < rbox[0][ax]) rbox[0][ax] = ray.rmax*poly->verts[v].pos[ax];
-			if(ray.rmax*poly->verts[v].pos[ax] > rbox[1][ax]) rbox[1][ax] = ray.rmax*poly->verts[v].pos[ax];
-		}
-		ibox[0][ax] = floor(rbox[0][ax]/hp->dx);
-		ibox[1][ax] = ceil(rbox[1][ax]/hp->dx)+1;
-		(*nbox)[ax] = ibox[1][ax] - ibox[0][ax];
+		poly->ibox[0].ijk[ax] = floor(rbox[0].xyz[ax]/hp->dx);
+		poly->ibox[1].ijk[ax] = ceil(rbox[1].xyz[ax]/hp->dx)+1;
+		(*nbox).ijk[ax] = poly->ibox[1].ijk[ax] - poly->ibox[0].ijk[ax];
 	}
 }
-
-
-	typedef struct {
-		real Itot;
-		rvec v0, v1;
-		rvec clipnorms[8];
-		int nclip;
-	} face_info;
-
-void add_clip_faces(rvec v0, rvec v1, face_info* face, hydro_problem* hp) {
-
-
-	if(hp->dim == 2) {
-		face->clipnorms[face->nclip][0] = -v0[1];
-		face->clipnorms[face->nclip][1] = v0[0];
-		face->nclip++; 
-		face->clipnorms[face->nclip][0] = v1[1]; 
-		face->clipnorms[face->nclip][1] = -v1[0];
-		face->nclip++; 
-	}
-	else if(hp->dim == 3) {
-		cross3(face->clipnorms[face->nclip], v0, v1)
-			//printf("Adding clip face with normal %f %f %f\n", face->clipnorms[face->nclip][0], face->clipnorms[face->nclip][1], face->clipnorms[face->nclip][2]);
-		face->nclip++; 
-	}
-}
-
-void clip_beam_poly(solid_angle_poly* poly, face_info* faces, real *domega, rvec* centroid, hydro_problem* hp) {
-
-
-	int f;
-	real sdists[32];
-	int clipped[32];
-
-	// variable declarations
-	int v, p, nclipped, np, onv, vstart, vcur, vnext, numunclipped; 
-	real len;
-
-	// direct access to vertex buffer
-	if(poly->nverts <= 0) return;
-
-	*domega = 0.0;
-
-	int* nverts = &poly->nverts;
-
-	// 2D case only!
-	// TODO: clean this up
-	if(hp->dim == 2) {
-		for(f = 0; f < faces->nclip; ++f) {
-	
-			// split vertices by their distance from the clip plane
-			nclipped = 0;
-			memset(&clipped, 0, sizeof(clipped));
-			for(v = 0; v < 2; ++v) {
-				sdists[v] = dot2(poly->verts[v].pos, faces->clipnorms[f]);
-				clipped[v] = (sdists[v] < 0.0);
-				nclipped += clipped[v]; 
-			}
-
-	
-			// skip this face if the poly lies entirely on one side of it 
-			if(nclipped == 0) continue;
-			if(nclipped == 2) {
-				poly->nverts = 0;
-				return;
-			}
-	
-			// otherwise, check all edges and insert new vertices on the bisected edges 
-			for(v = 0; v < 2; ++v) {
-				if(clipped[v]) {
-					wav2(poly->verts[v].pos, -sdists[1-v],
-						poly->verts[1-v].pos, sdists[v],
-						poly->verts[v].pos);
-				} 
-			}
-		}
-		if(poly->nverts && faces->nclip) {
-			for(v = 0; v < 2; ++v) {
-				len = sqrt(poly->verts[v].pos[0]*poly->verts[v].pos[0]+poly->verts[v].pos[1]*poly->verts[v].pos[1]);
-				poly->verts[v].pos[0] /= len;
-				poly->verts[v].pos[1] /= len;
-			}
-			*domega = asin(cross2(poly->verts[0].pos, poly->verts[1].pos));
-		}
-	}
-	
-	else if(hp->dim == 3) {
-
-		//printf("Clipping poly, nclip = %d\n", faces->nclip);
-
-
-		for(f = 0; f < faces->nclip; ++f) {
-
-			//printf("clip face %d, norm = %f %f %f\n", f, faces->clipnorms[f][0], faces->clipnorms[f][1], faces->clipnorms[f][2]);
-	
-			// split vertices by their distance from the clip plane
-			nclipped = 0;
-			memset(&clipped, 0, sizeof(clipped));
-			for(v = 0; v < poly->nverts; ++v) {
-				sdists[v] = dot3(poly->verts[v].pos, faces->clipnorms[f]);
-				clipped[v] = (sdists[v] < 0.0);
-				nclipped += clipped[v]; 
-			}
-
-			//printf("nclipped = %d\n", nclipped);
-
-	
-			// skip this face if the poly lies entirely on one side of it 
-			if(nclipped == 0) continue;
-			if(nclipped == poly->nverts) {
-				poly->nverts = 0;
-				return;
-			}
-	
-			// check all edges and insert new vertices on the bisected edges 
-			onv = *nverts;
-			for(vcur = 0; vcur < onv; ++vcur) {
-				if(clipped[vcur]) continue;
-				for(np = 0; np < 2; ++np) {
-					vnext = poly->verts[vcur].pnbrs[np];
-					if(!clipped[vnext]) continue;
-
-					//printf("  vert %d is clipped, vert %d is not\n", vcur, vnext);
-
-
-					poly->verts[*nverts].pnbrs[1-np] = vcur;
-					poly->verts[*nverts].pnbrs[np] = -1;
-					poly->verts[vcur].pnbrs[np] = *nverts;
-					wav3(poly->verts[vcur].pos, -sdists[vnext],
-						poly->verts[vnext].pos, sdists[vcur],
-						poly->verts[*nverts].pos);
-					(*nverts)++;
-				}
-			}
-
-			// for each new vert, search around the poly for its new neighbors
-			// and doubly-link everything
-			for(vstart = onv; vstart < *nverts; ++vstart) {
-				if(poly->verts[vstart].pnbrs[1] >= 0) continue;
-				vcur = poly->verts[vstart].pnbrs[0];
-				//printf("start reconnect loop  with verts %d -> %d\n", vstart, vcur);
-				do {
-					vcur = poly->verts[vcur].pnbrs[0]; 
-				} while(vcur < onv);
-				poly->verts[vstart].pnbrs[1] = vcur;
-				poly->verts[vcur].pnbrs[0] = vstart;
-			}
-
-			// go through and compress the vertex list, removing clipped verts
-			// and re-indexing accordingly (reusing `clipped` to re-index everything)
-			numunclipped = 0;
-			for(v = 0; v < *nverts; ++v) {
-				if(!clipped[v]) {
-					poly->verts[numunclipped] = poly->verts[v];
-					clipped[v] = numunclipped++;
-				}
-			}
-			*nverts = numunclipped;
-			for(v = 0; v < *nverts; ++v) {
-				poly->verts[v].pnbrs[0] = clipped[poly->verts[v].pnbrs[0]];
-				poly->verts[v].pnbrs[1] = clipped[poly->verts[v].pnbrs[1]];
-			}	
-
-
-			//printf("clipped face %d, norm = %f %f %f\n", f, faces->clipnorms[f][0], faces->clipnorms[f][1], faces->clipnorms[f][2]);
-			//for(v = 0; v < *nverts; ++v)
-				//printf(" vert %d, pos = %f %f %f, pnbrs = %d %d, clipped = %d\n", v, poly->verts[v].pos[0], poly->verts[v].pos[1], poly->verts[v].pos[2], poly->verts[v].pnbrs[0], poly->verts[v].pnbrs[1], clipped[v]);
-
-
-		}
-		if(poly->nverts) { //} && faces->nclip) {
-
-			// compute the final solid angle for this poly
-			rvec meanvec;
-			memset(meanvec, 0, sizeof(meanvec));
-			for(v = 0; v < poly->nverts; ++v) {
-				len = sqrt(poly->verts[v].pos[0]*poly->verts[v].pos[0]
-					+poly->verts[v].pos[1]*poly->verts[v].pos[1]+poly->verts[v].pos[2]*poly->verts[v].pos[2]);
-				poly->verts[v].pos[0] /= len;
-				poly->verts[v].pos[1] /= len;
-				poly->verts[v].pos[2] /= len;
-				meanvec[0] += poly->verts[v].pos[0];
-				meanvec[1] += poly->verts[v].pos[1];
-				meanvec[2] += poly->verts[v].pos[2];
-			}
-
-			len = sqrt(meanvec[0]*meanvec[0]+meanvec[1]*meanvec[1]+meanvec[2]*meanvec[2]);
-			meanvec[0] /= len;
-			meanvec[1] /= len;
-			meanvec[2] /= len;
-
-			(*centroid)[0] = 0;
-			(*centroid)[1] = 0;
-			(*centroid)[2] = 0;
-			for(v = 0; v < poly->nverts; ++v) {
-				real mydo = domega3(poly->verts[v].pos, poly->verts[poly->verts[v].pnbrs[1]].pos, meanvec); 
-				*domega += mydo; 
-				(*centroid)[0] += mydo*(poly->verts[v].pos[0] +  poly->verts[poly->verts[v].pnbrs[1]].pos[0] +  meanvec[0]);
-				(*centroid)[1] += mydo*(poly->verts[v].pos[1] +  poly->verts[poly->verts[v].pnbrs[1]].pos[1] +  meanvec[1]);
-				(*centroid)[2] += mydo*(poly->verts[v].pos[2] +  poly->verts[poly->verts[v].pnbrs[1]].pos[2] +  meanvec[2]);
-			}
-			len = sqrt((*centroid)[0]*(*centroid)[0]+(*centroid)[1]*(*centroid)[1]+(*centroid)[2]*(*centroid)[2]);
-			(*centroid)[0] /= len;
-			(*centroid)[1] /= len;
-			(*centroid)[2] /= len;
-		}
-	}
-}
-
-
 
 void update_radiation(real dt, hydro_problem* hp) {
 
-	int i, v, r, rminbits, rmaxbits, fin, fout, ornrays, refine, baseid, reflvl, refbits,
-		flatind, ii, jj, kk, quadrant, qid, rlvl, f, nbase, split;
-	dvec lsgn, grind, ibox[2], nbox;
-	real ray_mom_out, fmom_in, domega_in, domega_out, intensity_in, dobase, 
+	int i, v, r, ax, rminbits, rmaxbits, fin, fout, ornrays, refine, baseid, reflvl, refbits,
+		flatind, quadrant, qid, rlvl, f, nbase, split;
+	dvec lsgn, grind, nbox, loopind;
+	real ray_mom_out, fmom_in, domega_in, domega_out, intensity_in, dobase, flux_in, 
 		 ray_flux_out, err, allmin, allmax, r_in, r_out, secthmid, len, ray_omega, 
 		 cscthmid, inmin, inmax, outmin, outmax, fmid_in, fmid_out;
-	real rmin2[4], rmax2[4], flux_out[4], fmom_out[4];
-	rvec x0, rmid, tmpverts[8], ntmp, v0, v1;
+	real rmin2[4], rmax2[4], flux_out[4], fmom_out[4], moments[10];
+	rvec rmid, tmpverts[8], ntmp, v0, v1;
 	hydro_ray ray, r0, r1;
-	face_info ftmp, ftin, ftout, faces_in[4], faces_out[4];
-	solid_angle_poly beam_poly, inpoly, outpoly;
+	psi_poly beam_poly, inpoly, outpoly, cell_poly, beamtmp;
 
-				rvec centroid_in, centroid_out;
+	rvec centroid_in, centroid_out;
 
 #define subflux(t0, t1, thmin, thmax, fc, fm) (fc*(t1-t0)/(thmax-thmin))
 #define subfmom(t0, t1, thmin, thmax, fc, fm) (0.5*(th0+th1)*subflux(t0, t1, thmin, thmax, fc, fm))
@@ -375,7 +211,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 	if(hp->dim == 2) {
 		nbase = num_base_2d;
 		dobase = TWO_PI/nbase;
-	}
+	}	
 	else if(hp->dim == 3) {
 		nbase = num_base_3d;
 		dobase = 2*TWO_PI/nbase;
@@ -384,8 +220,8 @@ void update_radiation(real dt, hydro_problem* hp) {
 	// STEP 1: step all existing rays forward and refine if needed
 	ornrays = hp->nrays;
 	for(r = 0; r < ornrays; ++r) {
-		ray = hp->rays[r];
-		ray.rmin += CLIGHT*dt;
+		ray = hp->rays[r];        
+		ray.rmin += CLIGHT*dt;    
 		ray.rmax += CLIGHT*dt;
 		unpack_id_bits(ray.angle_id, baseid, reflvl, refbits);
 		ray_omega = dobase/(1<<reflvl);
@@ -418,14 +254,17 @@ void update_radiation(real dt, hydro_problem* hp) {
 		ray.rmax = CLIGHT*dt;
 		ray.Ftot = dt*1.0/nbase; 
 		for(i = 0; i < hp->dim; ++i) // TODO: source rays from their actual cells
-			ray.orcell[i] = hp->nx[i]/2;
+			ray.origin.xyz[i] = 0.5*hp->dx*(hp->nx.ijk[i]+1);
+		//ray.origin.x = 0.510283476082;
+		//ray.origin.y = 0.430283476082;
+		//ray.origin.z = 0.490283476082;
 		ray.angle_id = ((r&0xFF)<<24); 
 		hp->rays[hp->nrays++] = ray;
 	}
 	if(hp->nrays > 160000) printf("Error! Overflowed ray buffer.\n");
 
 	// Step 3: propagate all rays forward by c*dt
-	memset(hp->rad_grid, 0, (hp->nx[0]+4)*(hp->nx[1]+4)*(hp->nx[2]+4)*sizeof(rad_vector));
+	memset(hp->rad_grid, 0, (hp->nx.i+4)*(hp->nx.j+4)*(hp->nx.k+4)*sizeof(rad_vector));
 	ornrays = hp->nrays;
 	hp->nrays = 0;
 	for(r = 0; r < ornrays; ++r) {
@@ -434,213 +273,530 @@ void update_radiation(real dt, hydro_problem* hp) {
 		// also get the ray's bounding box, relative to the originating cell 
 		// this works because we work in one single dummy quadrant
 		ray = hp->rays[r];
-		get_beam_poly(ray, &beam_poly, ibox, &nbox, &lsgn, hp);
+		get_beam_poly(ray, &beam_poly, &nbox, &lsgn, hp);
 		unpack_id_bits(ray.angle_id, baseid, reflvl, refbits);
-		ray_omega = dobase/(1<<reflvl);
+		ray_omega = dobase/(1<<reflvl);               
 
-		//printf("Beam %d poly: %f %f %f, %f %f %f, %f %f %f\n", r, beam_poly.verts[0].pos[0], beam_poly.verts[0].pos[1], beam_poly.verts[0].pos[2], beam_poly.verts[1].pos[0], beam_poly.verts[1].pos[1], beam_poly.verts[1].pos[2], beam_poly.verts[2].pos[0], beam_poly.verts[2].pos[1], beam_poly.verts[2].pos[2]);
-		//printf("  Total flux = %.5e, solid angle = %.5e\n", ray.Ftot, ray_omega);
+		if(baseid > 5) continue;
 
-		//printf("  ibox = %d %d %d to %d %d %d\n", ibox[0][0], ibox[0][1], ibox[0][2], ibox[1][0], ibox[1][1], ibox[1][2]);
-		//printf("  nbox = %d %d %d\n", nbox[0], nbox[1], nbox[2]);
-		//if(hp->dim == 2)
-			//printf("  domega = %f\n", domega2(beam_poly.verts[0].pos, beam_poly.verts[1].pos));
-		//else if(hp->dim == 3)
-			//printf("  domega = %f\n", domega3(beam_poly.verts[0].pos, beam_poly.verts[1].pos, beam_poly.verts[2].pos));
+		int nfaces;
+		psi_face_buffer faces[16], face_in, face_out;
+		psi_voxels vox;
+		psi_poly curpoly;
 
+		printf("Ray %d\n", r);
 
-		if(ray.rmin > 1.0) continue;
-		// Hacky BCs. TODO: Figure this out better
-		if(ibox[0][0] + ray.orcell[0] >= hp->nx[0]+1) continue; 
-		if(ibox[0][1] + ray.orcell[1] >= hp->nx[1]+1)  continue; 
-		if(ibox[1][0] + ray.orcell[0] < -1)  continue; 
-		if(ibox[1][1] + ray.orcell[1] < -1)  continue; 
+		// translate the poly to an integer offset
+		dvec offset = beam_poly.ibox[0]; 
+		rvec ortmp = ray.origin; 
+		for(ax = 0; ax < 3; ++ax) {
+			//offset.ijk[ax] = beam_poly.ibox[(1+lsgn.ijk[ax])/2].ijk[ax];
+			beam_poly.ibox[0].ijk[ax] -= offset.ijk[ax];
+			beam_poly.ibox[1].ijk[ax] -= offset.ijk[ax];
+			for(v = 0; v < beam_poly.nverts; ++v)
+				beam_poly.verts[v].pos.xyz[ax] -= hp->dx*offset.ijk[ax];
+			ortmp.xyz[ax] -= hp->dx*offset.ijk[ax];
+		}
 
-		if(hp->dim == 3) {
-		
-			// allocate an array of flux information
-			// fill in grid indices and polar coordinates 
-			// then loop over all rays, processing their geometry and fluxes
-			struct {
-				real flux_in[hp->dim+1];
-				real fmom_in[hp->dim+1];
-				real r2;
-			} voxdata[nbox[0]+1][nbox[1]+1][nbox[2]+1];
-			memset(voxdata, 0, sizeof(voxdata));
-			for(ii = 0; ii <= nbox[0]; ++ii)
-			for(jj = 0; jj <= nbox[1]; ++jj)
-			for(kk = 0; kk <= nbox[2]; ++kk) {
-				x0[0] = hp->dx*(ibox[0][0]+ii-0.5);
-				x0[1] = hp->dx*(ibox[0][1]+jj-0.5);
-				x0[2] = hp->dx*(ibox[0][2]+kk-0.5);
-				voxdata[ii][jj][kk].r2 = x0[0]*x0[0] + x0[1]*x0[1] + x0[2]*x0[2];
+		struct {
+			real flux_in[8]; // TODO: Don't need this many indices
+		} transfer_info[nbox.i+1][nbox.j+1][nbox.k+1];
+
+		memset(transfer_info, 0, sizeof(transfer_info));
+
+		// voxelize the beam
+		ray_flux_out = 0.0;
+		psi_voxels_init(&vox, &beam_poly, &lsgn, hp);
+		while(psi_voxels_next(&vox, &curpoly)) {
+
+			// make sure we're inside the grid bounds before processing
+			dvec locind = curpoly.ibox[0];
+			for(ax = 0; ax < 3; ++ax)
+				grind.ijk[ax] = locind.ijk[ax] + offset.ijk[ax];
+			for(ax = 0; ax < hp->dim; ++ax)
+				if(grind.ijk[ax] < 0 || grind.ijk[ax] >= hp->nx.ijk[ax])
+					goto next_cell;
+			flatind = flat_index(grind, hp);
+
+			// process the solid angle intersections of the faces
+			// first, translate the voxel into coordinates centered on the ray source
+			int nflag = 0;
+			for(v = 0; v < curpoly.nverts; ++v) {
+				nflag += curpoly.verts[v].flags;
+				for(ax = 0; ax < hp->dim; ++ax)
+					curpoly.verts[v].pos.xyz[ax] -= ortmp.xyz[ax];
 			}
-	
-			ray_flux_out = 0.0;
-			ray_mom_out = 0.0;
-			for(ii = 0; ii < nbox[0]; ++ii)
-			for(jj = 0; jj < nbox[1]; ++jj) 
-			for(kk = 0; kk < nbox[2]; ++kk) {
+			if(nflag == 3) {
+				transfer_info[locind.i+1][locind.j][locind.k].flux_in[0] = 0.33333333*ray.Ftot;
+				transfer_info[locind.i][locind.j+1][locind.k].flux_in[2] = 0.33333333*ray.Ftot;
+				transfer_info[locind.i][locind.j][locind.k+1].flux_in[4] = 0.33333333*ray.Ftot;
+				continue;
+			}
 
-				//if(ii >= 3)  continue; 
-				//if(jj >= 3)  continue; 
-				//if(kk >= 3)  continue; 
-	
-				if(ii >= hp->nx[0])  continue; 
-				if(jj >= hp->nx[1])  continue; 
-				if(kk >= hp->nx[2])  continue; 
+			psi_poly poly_in, poly_out;
+			real omega_in, omega_in_tot, omega_out_tot;
 
-				int px = 10, py = 1, pz = 1;
-				int print = (ii == px && jj == py && kk == pz);
-	
-	
-				grind[0] = lsgn[0]*(ibox[0][0] + ii) + ray.orcell[0];
-				grind[1] = lsgn[1]*(ibox[0][1] + jj) + ray.orcell[1];
-				grind[2] = lsgn[2]*(ibox[0][2] + kk) + ray.orcell[2];
-				x0[0] = hp->dx*(ibox[0][0]+ii-0.5);
-				x0[1] = hp->dx*(ibox[0][1]+jj-0.5);
-				x0[2] = hp->dx*(ibox[0][2]+kk-0.5);
-				flatind = flat_index(grind, hp);
-	
-				// get the bitmask for this voxel telling us the 
-				// incoming and outgoing ray geometry
-				rminbits = 0;
-				rmaxbits = 0;
-				rvec cubeverts[8];
-				for(v = 0; v < 8; ++v) {
-					rmin2[v] = voxdata[ii+((v>>0)&1)][jj+((v>>1)&1)][kk+((v>>2)&1)].r2 - ray.rmin*ray.rmin;
-					rminbits |= (rmin2[v] > 0.0)<<v;
-					rmax2[v] = ray.rmax*ray.rmax - voxdata[ii+((v>>0)&1)][jj+((v>>1)&1)][kk+((v>>2)&1)].r2;
-			//printf("clip face %d, norm = %f %f %f\n", f, faces->clipnorms[f][0], faces->clipnorms[f][1], faces->clipnorms[f][2]);
-			//for(v = 0; v < *nverts; ++v)
-				//printf(" vert %d, pos = %f %f %f, pnbrs = %d %d, clipped = %d\n", v, poly->verts[v].pos[0], poly->verts[v].pos[1], poly->verts[v].pos[2], poly->verts[v].pnbrs[0], poly->verts[v].pnbrs[1], clipped[v]);
-					rmaxbits |= (rmax2[v] > 0.0)<<v;
-					cubeverts[v][0] = x0[0]+hp->dx*((v>>0)&1); 
-					cubeverts[v][1] = x0[1]+hp->dx*((v>>1)&1); 
-					cubeverts[v][2] = x0[2]+hp->dx*((v>>2)&1); 
+			omega_in_tot = 0.0;
+			omega_out_tot = 0.0;
+
+			psi_extract_faces(&curpoly, faces, &nfaces);
+
+			int ornf = nfaces;
+			nfaces = 0;
+			for(f = 0; f < ornf; ++f) {
+
+				// make a poly out of it and filter tiny pieces
+				face_in = faces[f];
+				poly_in.nverts = face_in.nverts;
+				for(v = 0; v < face_in.nverts; ++v) {
+					poly_in.verts[v].pos = face_in.verts[v];
+					poly_in.verts[v].pnbrs[0] = (v + face_in.nverts - 1)%face_in.nverts; 
+					poly_in.verts[v].pnbrs[1] = (v + 1)%face_in.nverts; 
 				}
-				if(ray.orcell[0] == grind[0] && ray.orcell[1] == grind[1] && ray.orcell[2] == grind[2]) {
-					voxdata[ii][jj][kk].flux_in[hp->dim] = ray.Ftot;
-					rminbits = 0xFFFF;
-				} 
-				if(!(rminbits && rmaxbits)) continue;
+				reduce_beam_poly(&poly_in, &omega_in);
 
-				// incoming ray cases
-				memset(faces_in, 0, sizeof(faces_in));
-				switch(rminbits) {
-
-					case 0xFF:
-						add_clip_faces(cubeverts[4], cubeverts[0], &faces_in[0], hp);
-						add_clip_faces(cubeverts[6], cubeverts[4], &faces_in[0], hp);
-						add_clip_faces(cubeverts[2], cubeverts[6], &faces_in[0], hp);
-						add_clip_faces(cubeverts[0], cubeverts[2], &faces_in[0], hp);
-						add_clip_faces(cubeverts[1], cubeverts[0], &faces_in[1], hp);
-						add_clip_faces(cubeverts[5], cubeverts[1], &faces_in[1], hp);
-						add_clip_faces(cubeverts[4], cubeverts[5], &faces_in[1], hp);
-						add_clip_faces(cubeverts[0], cubeverts[4], &faces_in[1], hp);
-						add_clip_faces(cubeverts[0], cubeverts[1], &faces_in[2], hp);
-						add_clip_faces(cubeverts[2], cubeverts[0], &faces_in[2], hp);
-						add_clip_faces(cubeverts[3], cubeverts[2], &faces_in[2], hp);
-						add_clip_faces(cubeverts[1], cubeverts[3], &faces_in[2], hp);
-						break;
+				if(face_in.face_id%2)
+					omega_out_tot += -omega_in;
+				else	
+					omega_in_tot += omega_in;
 
 
-					case 0xF0:
-						printf("0xf0\n");
+				printf("omega = %.5e\n", omega_in);
+				//if(fabs(omega_in) > 1.0e-12*ray_omega)
+					faces[nfaces++] = face_in;
+			}
 
-						add_clip_faces(cubeverts[4], cubeverts[0], &faces_in[0], hp);
-						add_clip_faces(cubeverts[6], cubeverts[4], &faces_in[0], hp);
-						add_clip_faces(cubeverts[2], cubeverts[6], &faces_in[0], hp);
-						add_clip_faces(cubeverts[0], cubeverts[2], &faces_in[0], hp);
+			err = fabs(1.0 - omega_out_tot/omega_in_tot);
+			if(err > 1.0e-6) {
+				printf(" First solid angle check.  Omega_in_tot = %.5e, omega_out_tot = %.5e, err = %.5e\n", omega_in_tot, omega_out_tot, err);
+			}
 
 
 
+			real domega;
+			rvec centroid;
 
+			real omega_x = 0.0;
 
+			real flux_in_tot = 0.0;
+			real flux_out_tot = 0.0;
 
-						add_clip_faces(cubeverts[1], cubeverts[0], &faces_in[1], hp);
-						add_clip_faces(cubeverts[5], cubeverts[1], &faces_in[1], hp);
-						add_clip_faces(cubeverts[4], cubeverts[5], &faces_in[1], hp);
-						add_clip_faces(cubeverts[0], cubeverts[4], &faces_in[1], hp);
-						add_clip_faces(cubeverts[0], cubeverts[1], &faces_in[2], hp);
-						add_clip_faces(cubeverts[2], cubeverts[0], &faces_in[2], hp);
-						add_clip_faces(cubeverts[3], cubeverts[2], &faces_in[2], hp);
-						add_clip_faces(cubeverts[1], cubeverts[3], &faces_in[2], hp);
+			//printf(" voxel %d %d %d\n", curpoly.ibox[0].i, curpoly.ibox[0].j, curpoly.ibox[0].k);
 
-						break;
+			for(fin = 0; fin < nfaces; ++fin) {
+				face_in = faces[fin];
+				if(face_in.face_id%2 != 0) continue;
 
+				// copy the input poly into a new poly struct for clipping
+				// get its solid angle as viewed from the source
+				poly_in.nverts = face_in.nverts;
+				for(v = 0; v < face_in.nverts; ++v) {
+					poly_in.verts[v].pos = face_in.verts[v];
+					poly_in.verts[v].pnbrs[0] = (v + face_in.nverts - 1)%face_in.nverts; 
+					poly_in.verts[v].pnbrs[1] = (v + 1)%face_in.nverts; 
 
-					case 0xFFFF: // ray origin, already set the flux
-						//add_clip_faces(beam_poly.verts[0].pos, beam_poly.verts[1].pos, &faces_in[3], hp);
-						//add_clip_faces(beam_poly.verts[1].pos, beam_poly.verts[2].pos, &faces_in[3], hp);
-						//add_clip_faces(beam_poly.verts[2].pos, beam_poly.verts[0].pos, &faces_in[3], hp);
-						break;
-					default: 
-						printf("Bad incoming bit mask! How can this be?? 0x%x\n", rminbits);
-						//exit(0);
-						return;
-						break;
+					//printf("In vert = %.5e, %.5e, %.5e\n", face_in.verts[v].x, face_in.verts[v].y, face_in.verts[v].z);
 				}
-	
-				// outgoing ray cases
-				memset(faces_out, 0, sizeof(faces_out));
-				switch(rmaxbits) {
-					case 0xFF:
-						// TODO: double-check the ordering of these faces...
-						add_clip_faces(cubeverts[1], cubeverts[3], &faces_out[0], hp);
-						add_clip_faces(cubeverts[3], cubeverts[7], &faces_out[0], hp);
-						add_clip_faces(cubeverts[7], cubeverts[5], &faces_out[0], hp);
-						add_clip_faces(cubeverts[5], cubeverts[1], &faces_out[0], hp);
-						add_clip_faces(cubeverts[3], cubeverts[2], &faces_out[1], hp);
-						add_clip_faces(cubeverts[2], cubeverts[6], &faces_out[1], hp);
-						add_clip_faces(cubeverts[6], cubeverts[7], &faces_out[1], hp);
-						add_clip_faces(cubeverts[7], cubeverts[3], &faces_out[1], hp);
-						add_clip_faces(cubeverts[4], cubeverts[5], &faces_out[2], hp);
-						add_clip_faces(cubeverts[5], cubeverts[7], &faces_out[2], hp);
-						add_clip_faces(cubeverts[7], cubeverts[6], &faces_out[2], hp);
-						add_clip_faces(cubeverts[6], cubeverts[4], &faces_out[2], hp);
-						break;
-					default:
-						//printf("outgoing 0x%x\n", rmaxbits);
-
-						//int vcur, vnext, vcurgood, vnextgood, ax;
-
-						//for(vcur = 0; vcur < 8; ++vcur) {
-
-							//vcurgood = ((rmaxbits>>vcur)&1);
-							//if(!vcurgood) continue;
-
-							//printf(" vert %d is inside\n", vcur);
+				reduce_beam_poly(&poly_in, &omega_in);
+				if(omega_in <= 0.0) continue;
 
 
-
-							//for(ax = 0; ax < hp->dim; ++ax) {
-								//vnext = vcur^(1<<ax); // the next vertex along this axis
-								//vnextgood = ((rmaxbits>>vnext)&1);
-
-								//if(vnextgood) continue;
-
-								//// vcur and vnext are on opposite sides!
-
-								//printf("Found bisected edge between verts %d, %d\n", vcur, vnext);
-							
-							
-							
-							//}
+				psi_plane clip_in[16];
+				memset(clip_in, 0, sizeof(clip_in));
+				int nclip = 0; 
+				for(v = 0; v < face_in.nverts; ++v)
+					cross3(clip_in[nclip++].n, face_in.verts[(v+1)%face_in.nverts], face_in.verts[v]);
 						
-						//}
-
-						hp->rad_grid[flatind].E = 1.0; 
-
-						continue;
 
 
-						//printf("Bad outgoing bit mask! How can this be?? 0x%x\n", rmaxbits);
-						//exit(0);
-						break;
+
+				//printf("in %d, domega = %.5e\n", face_in.face_id, omega_in);
+
+				real omega_out;
+				real omega_out_tot = 0.0;
+				rvec centroid_out;
+				rvec cliptmp;
+				for(fout = 0; fout < nfaces; ++fout) {
+					face_out = faces[fout];
+					if(face_out.face_id%2 == 0) continue;
+
+					poly_out.nverts = face_out.nverts;
+					for(v = 0; v < face_out.nverts; ++v) {
+						poly_out.verts[v].pos = face_out.verts[v];
+						poly_out.verts[v].pnbrs[0] = (v + face_out.nverts - 1)%face_out.nverts; 
+						poly_out.verts[v].pnbrs[1] = (v + 1)%face_out.nverts; 
+	
+						//printf("In vert = %.5e, %.5e, %.5e\n", face_out.verts[v].x, face_out.verts[v].y, face_out.verts[v].z);
+					}
+					reduce_beam_poly(&poly_out, &omega_out);
+					//if(omega_out <= 0.0) continue;
+
+
+
+					// TODO: make these clip planes ahead of time
+					psi_plane clip_out[16];
+					memset(clip_out, 0, sizeof(clip_out));
+					int nclip = 0; 
+					for(v = 0; v < face_out.nverts; ++v) {
+						cross3(cliptmp, face_out.verts[(v+1)%face_out.nverts], face_out.verts[v]);
+						//printf("  Out vert = %.5e, %.5e, %.5e\n", face_out.verts[v].x, face_out.verts[v].y, face_out.verts[v].z);
+						//printf("   face norm = %.5e, %.5e, %.5e\n", cliptmp.x, cliptmp.y, cliptmp.z);
+						len = sqrt(cliptmp.x*cliptmp.x + cliptmp.y*cliptmp.y + cliptmp.z*cliptmp.z);
+
+						//if(len > 1.0e-6*hp->dx)
+							clip_out[nclip++].n = cliptmp;
+					}
+					poly_out = poly_in;
+					clip_beam_poly(&poly_out, clip_out, nclip, hp); 
+					reduce_beam_poly(&poly_out, &domega);
+
+					//printf("  out %d, domega = %.5e\n", face_out.face_id, domega);
+					for(v = 0; v < poly_out.nverts; ++v)
+						//printf("  Clipped out vert = %.5e, %.5e, %.5e\n", poly_out.verts[v].pos.x, poly_out.verts[v].pos.y, poly_out.verts[v].pos.z);
+					//if(domega <= 0.0) continue;
+
+					omega_out += domega;
+					//centroid_out[face_out.face_id] = centroid;
+					omega_out_tot += domega;
 				}
 
+				err = fabs(1.0 - omega_out_tot/omega_in);
+				if(err > 1.0e-6) {
+					//printf("Incorrect solid angle! Omega_in = %.5e, omega_out_tot = %.5e, err = %.5e\n", omega_in, omega_out_tot, err);
+					//exit(0);
+				}
 
+				//hp->rad_grid[flatind].E += err; 
+				//hp->rad_grid[flatind].E += omega_in;
+				hp->rad_grid[flatind].E += omega_out_tot;
+
+
+#if 0
+
+				if(face_in.face_id == BEAM_IN)
+					flux_in = omega_out_tot/ray_omega*ray.Ftot; 
+				else
+					flux_in = transfer_info[locind.i][locind.j][locind.k].flux_in[face_in.face_id];
+				if(flux_in <= 0.0) continue;
+
+
+				flux_in_tot += flux_in; 
+
+				if(omega_out_tot <= 0.0) {
+				
+					//hp->rad_grid[flatind].E += 1.0; 
+					//
+					if(flux_in > 1.0e-10*ray.Ftot)
+						printf(" Omega_out = %.5e, flux_in = %.5e for incoming face %d\n", omega_out_tot, flux_in, face_in.face_id);
+					continue;
+				} 
+
+
+				// get the fraction of solid angle belonging to each outgoing face
+				for(fout = 0; fout < 8; ++fout) 
+					omega_out[fout] /= omega_out_tot;
+
+				real flux_out = 0.0;
+
+				// fout now refers to face id 
+				for(fout = 1; fout < 6; fout += 2) {
+
+					//if(omega_out[fout] < 1.0e-6)
+						//continue;
+
+					fmid_in = flux_in*omega_out[fout];
+
+					centroid = centroid_out[fout];
+
+					fmid_out = fmid_in;
+
+						//if(print) printf("Centroid_out = %f %f %f\n", centroid_out[0], centroid_out[1], centroid_out[2]);
+
+	
+						// track a solid beam between the two faces
+						// calculate the optical depth to first order in theta
+						//real k = 0.0;
+						//fmid_in = intensity_in*domega_out;
+
+					////err = fabs(1.0-fmid_in/(domega_out/ray_omega*ray.Ftot));
+					////if(err > 1.0e-12)
+						////printf("fmid_in = %.5e, expected flux = %.5e\n", fmid_in, domega_out/ray_omega*ray.Ftot);
+
+	
+						//// get the correct inner and outer radlocind.i, then attenuate exponentially 
+						if(face_in.face_id == 0) r_in = (hp->dx*locind.i-ortmp.x)/centroid.x; // x-facing faces
+						else if(face_in.face_id == 2) r_in = (hp->dx*locind.j-ortmp.y)/centroid.y; // y-facing faces
+						else if(face_in.face_id == 4) r_in = (hp->dx*locind.k-ortmp.z)/centroid.z; // z-facing faces
+						else if(face_in.face_id == hp->dim) r_in = ray.rmin; // incoming ray front 
+						//if(rminbits == 0xFFFF) r_in = 0.0; // TODO: why is this needed??
+
+						if(fout == 1) r_out = (hp->dx*(locind.i+1)-ortmp.x)/centroid.x;
+						else if(fout == 3) r_out = (hp->dx*(locind.j+1)-ortmp.y)/centroid.y;
+						else if(fout == 5) r_out = (hp->dx*(locind.k+1)-ortmp.z)/centroid.z;
+						else if(fout == hp->dim) r_out = ray.rmax; //outgoing ray front 
+						//printf("Fmid_in = %.5e\n", fmid_in);
+
+
+					//hp->rad_grid[flatind].E += omega_out[fout]*omega_out_tot; 
+					//hp->rad_grid[flatind].E += fmid_in;// 0.5*(fmid_in+fmid_out)*(r_out-r_in)/(ray.rmax-ray.rmin)/(hp->dx*hp->dx); 
+					//hp->rad_grid[flatind].E += 0.5*(fmid_in+fmid_out)*(r_out-r_in)/(ray.rmax-ray.rmin)/(hp->dx*hp->dx); 
+
+
+					transfer_info[locind.i+(fout==1)][locind.j+(fout==3)][locind.k+(fout==5)].flux_in[fout-1]
+						+= fmid_in;
+					flux_out_tot += fmid_in;
+					flux_out += fmid_in;
+				
+				}
+
+				//hp->rad_grid[flatind].E += flux_in*omega_out[BEAM_OUT];
+				ray_flux_out += flux_in*omega_out[BEAM_OUT];
+				flux_out_tot += flux_in*omega_out[BEAM_OUT];
+
+				flux_out += flux_in*omega_out[BEAM_OUT];
+
+
+
+				err = fabs(1.0 - flux_out/flux_in);
+				if(err > 1.0e-15) {
+					printf(" Flux error: voxel %d %d %d, face in %d\n", grind.i, grind.j, grind.k, face_in.face_id);
+				//printf("flux_in = %.5e, flux_out = %.5e, err = %.5e\n", flux_in, flux_out, err);
+					printf("   flux_in = %.5e, flux_out = %.5e, err = %.5e\n", flux_in, flux_out, err);
+
+				
+				}
+#endif
+
+
+
+			
+			}
+
+			//err = fabs(1.0 - flux_out_tot/flux_in_tot);
+			//if(err > 1.0e-12) {
+			//if(1) {
+				//printf("voxel %d %d %d\n", grind.i, grind.j, grind.k);
+				//printf(" flux_in = %.5e, flux_out = %.5e, err = %.5e\n", flux_in_tot, flux_out_tot, err);
+			
+			//}
+
+			next_cell: continue;
+		}
+
+
+		//err = fabs(1.0 - ray_flux_out/ray.Ftot);
+		//if(err > 1.0e-12) {
+			//printf(" ray %d: flux_in = %.5e, flux_out = %.5e, err = %.5e\n", r, ray.Ftot, ray_flux_out, err);
+		//}
+		
+
+		// set the outgoing ray flux
+		//ray.Ftot = 1.0; 
+		hp->rays[hp->nrays++] = ray;
+	}
+
+}
+
+void reduce_beam_poly(psi_poly* poly, real *domega) {
+
+
+	// variable declarations
+	int f;
+	real sdists[32];
+	int clipped[32];
+	int v, p, nclipped, np, onv, vstart, vcur, vnext, numunclipped; 
+	real len;
+	rvec meanvec;
+
+	// direct access to vertex buffer
+	*domega = 0.0;
+	if(poly->nverts <= 0)
+		return;
+
+	// compute the final solid angle for this poly
+	memset(&meanvec, 0, sizeof(meanvec));
+	for(v = 0; v < poly->nverts; ++v) {
+		len = sqrt(poly->verts[v].pos.xyz[0]*poly->verts[v].pos.xyz[0]
+			+poly->verts[v].pos.xyz[1]*poly->verts[v].pos.xyz[1]+poly->verts[v].pos.xyz[2]*poly->verts[v].pos.xyz[2]);
+		poly->verts[v].pos.xyz[0] /= len;
+		poly->verts[v].pos.xyz[1] /= len;
+		poly->verts[v].pos.xyz[2] /= len;
+		meanvec.xyz[0] += poly->verts[v].pos.xyz[0];
+		meanvec.xyz[1] += poly->verts[v].pos.xyz[1];
+		meanvec.xyz[2] += poly->verts[v].pos.xyz[2];
+	}
+	len = sqrt(meanvec.x*meanvec.x+meanvec.y*meanvec.y+meanvec.z*meanvec.z);
+	meanvec.xyz[0] /= len;
+	meanvec.xyz[1] /= len;
+	meanvec.xyz[2] /= len;
+
+	for(v = 0; v < poly->nverts; ++v) {
+		real mydo = domega3(poly->verts[v].pos, poly->verts[poly->verts[v].pnbrs[1]].pos, meanvec); 
+		*domega += mydo; 
+	}
+}
+
+
+void clip_beam_poly(psi_poly* poly, psi_plane* faces, int nclip, hydro_problem* hp) {
+
+
+	// variable declarations
+	int f;
+	real sdists[32];
+	int clipped[32];
+	int v, p, nclipped, np, onv, vstart, vcur, vnext, numunclipped; 
+	real len;
+
+	// direct access to vertex buffer
+	if(poly->nverts <= 0) return;
+	int* nverts = &poly->nverts;
+	for(f = 0; f < nclip; ++f) {
+
+		// split vertices by their distance from the clip plane
+		nclipped = 0;
+		memset(&clipped, 0, sizeof(clipped));
+		for(v = 0; v < poly->nverts; ++v) {
+			sdists[v] = dot3(poly->verts[v].pos, faces[f].n);
+			clipped[v] = (sdists[v] < 0.0);
+			nclipped += clipped[v]; 
+		}
+
+		// skip this face if the poly lies entirely on one side of it 
+		if(nclipped == 0) continue;
+		if(nclipped == poly->nverts) {
+			poly->nverts = 0;
+			return;
+		}
+
+		// check all edges and insert new vertices on the bisected edges 
+		onv = *nverts;
+		for(vcur = 0; vcur < onv; ++vcur) {
+			if(clipped[vcur]) continue;
+			for(np = 0; np < 2; ++np) {
+				vnext = poly->verts[vcur].pnbrs[np];
+				if(!clipped[vnext]) continue;
+				poly->verts[*nverts].pnbrs[1-np] = vcur;
+				poly->verts[*nverts].pnbrs[np] = -1;
+				poly->verts[vcur].pnbrs[np] = *nverts;
+				wav3(poly->verts[vcur].pos, -sdists[vnext],
+					poly->verts[vnext].pos, sdists[vcur],
+					poly->verts[*nverts].pos);
+				(*nverts)++;
+			}
+		}
+
+		// for each new vert, search around the poly for its new neighbors
+		// and doubly-link everything
+		for(vstart = onv; vstart < *nverts; ++vstart) {
+			if(poly->verts[vstart].pnbrs[1] >= 0) continue;
+			vcur = poly->verts[vstart].pnbrs[0];
+			do {
+				vcur = poly->verts[vcur].pnbrs[0]; 
+			} while(vcur < onv);
+			poly->verts[vstart].pnbrs[1] = vcur;
+			poly->verts[vcur].pnbrs[0] = vstart;
+		}
+
+		// go through and compress the vertex list, removing clipped verts
+		// and re-indexing accordingly (reusing `clipped` to re-index everything)
+		numunclipped = 0;
+		for(v = 0; v < *nverts; ++v) {
+			if(!clipped[v]) {
+				poly->verts[numunclipped] = poly->verts[v];
+				clipped[v] = numunclipped++;
+			}
+		}
+		*nverts = numunclipped;
+		for(v = 0; v < *nverts; ++v) {
+			poly->verts[v].pnbrs[0] = clipped[poly->verts[v].pnbrs[0]];
+			poly->verts[v].pnbrs[1] = clipped[poly->verts[v].pnbrs[1]];
+		}	
+	}
+
+#if 0
+	*domega = 0.0;
+	if(poly->nverts) { 
+
+		// compute the final solid angle for this poly
+		rvec meanvec;
+		memset(&meanvec, 0, sizeof(meanvec));
+		for(v = 0; v < poly->nverts; ++v) {
+			len = sqrt(poly->verts[v].pos.xyz[0]*poly->verts[v].pos.xyz[0]
+				+poly->verts[v].pos.xyz[1]*poly->verts[v].pos.xyz[1]+poly->verts[v].pos.xyz[2]*poly->verts[v].pos.xyz[2]);
+			poly->verts[v].pos.xyz[0] /= len;
+			poly->verts[v].pos.xyz[1] /= len;
+			poly->verts[v].pos.xyz[2] /= len;
+			meanvec.xyz[0] += poly->verts[v].pos.xyz[0];
+			meanvec.xyz[1] += poly->verts[v].pos.xyz[1];
+			meanvec.xyz[2] += poly->verts[v].pos.xyz[2];
+		}
+
+		len = sqrt(meanvec.xyz[0]*meanvec.xyz[0]+meanvec.xyz[1]*meanvec.xyz[1]+meanvec.xyz[2]*meanvec.xyz[2]);
+		meanvec.xyz[0] /= len;
+		meanvec.xyz[1] /= len;
+		meanvec.xyz[2] /= len;
+
+		(*centroid).xyz[0] = 0;
+		(*centroid).xyz[1] = 0;
+		(*centroid).xyz[2] = 0;
+		for(v = 0; v < poly->nverts; ++v) {
+			real mydo = domega3(poly->verts[v].pos, poly->verts[poly->verts[v].pnbrs[1]].pos, meanvec); 
+			*domega += mydo; 
+			(*centroid).xyz[0] += mydo*(poly->verts[v].pos.xyz[0] +  poly->verts[poly->verts[v].pnbrs[1]].pos.xyz[0] +  meanvec.xyz[0]);
+			(*centroid).xyz[1] += mydo*(poly->verts[v].pos.xyz[1] +  poly->verts[poly->verts[v].pnbrs[1]].pos.xyz[1] +  meanvec.xyz[1]);
+			(*centroid).xyz[2] += mydo*(poly->verts[v].pos.xyz[2] +  poly->verts[poly->verts[v].pnbrs[1]].pos.xyz[2] +  meanvec.xyz[2]);
+		}
+		len = sqrt((*centroid).xyz[0]*(*centroid).xyz[0]+(*centroid).xyz[1]*(*centroid).xyz[1]+(*centroid).xyz[2]*(*centroid).xyz[2]);
+		(*centroid).xyz[0] /= len;
+		(*centroid).xyz[1] /= len;
+		(*centroid).xyz[2] /= len;
+	}
+#endif
+}
+
+	
+#if 0
+	// 2D case only!
+	// TODO: clean this up
+	//else if(hp->dim == 2) {
+		//for(f = 0; f < faces->nclip; ++f) {
+	
+			//// split vertices by their distance from the clip plane
+			//nclipped = 0;
+			//memset(&clipped, 0, sizeof(clipped));
+			//for(v = 0; v < 2; ++v) {
+				//sdists[v] = dot2(poly->verts[v].pos, faces->clipnorms[f]);
+				//clipped[v] = (sdists[v] < 0.0);
+				//nclipped += clipped[v]; 
+			//}
+
+	
+			//// skip this face if the poly lies entirely on one side of it 
+			//if(nclipped == 0) continue;
+			//if(nclipped == 2) {
+				//poly->nverts = 0;
+				//return;
+			//}
+	
+			//// otherwise, check all edges and insert new vertices on the bisected edges 
+			//for(v = 0; v < 2; ++v) {
+				//if(clipped[v]) {
+					//wav2(poly->verts[v].pos, -sdists[1-v],
+						//poly->verts[1-v].pos, sdists[v],
+						//poly->verts[v].pos);
+				//} 
+			//}
+		//}
+		//if(poly->nverts && faces->nclip) {
+			//for(v = 0; v < 2; ++v) {
+				//len = sqrt(poly->verts[v].pos.xyz[0]*poly->verts[v].pos.xyz[0]+poly->verts[v].pos.xyz[1]*poly->verts[v].pos.xyz[1]);
+				//poly->verts[v].pos.xyz[0] /= len;
+				//poly->verts[v].pos.xyz[1] /= len;
+			//}
+			//*domega = asin(cross2(poly->verts[0].pos, poly->verts[1].pos));
+		//}
+	//}
+	
 	
 				// compute pairwise intersections between in, out faces
 				// to get the outgoing fluxes
@@ -700,14 +856,14 @@ void update_radiation(real dt, hydro_problem* hp) {
 
 	
 						// get the correct inner and outer radii, then attenuate exponentially 
-						if(fin == 0) r_in = x0[0]/centroid_out[0]; // x-facing faces
-						else if(fin == 1) r_in = x0[1]/centroid_out[1]; // y-facing faces
-						else if(fin == 2) r_in = x0[2]/centroid_out[2]; // z-facing faces
+						if(fin == 0) r_in = x0.x/centroid_out[0]; // x-facing faces
+						else if(fin == 1) r_in = x0.y/centroid_out[1]; // y-facing faces
+						else if(fin == 2) r_in = x0.z/centroid_out[2]; // z-facing faces
 						else if(fin == hp->dim) r_in = ray.rmin; // incoming ray front 
 						if(rminbits == 0xFFFF) r_in = 0.0; // TODO: why is this needed??
-						if(fout == 0) r_out = (x0[0]+hp->dx)/centroid_out[0];
-						else if(fout == 1) r_out = (x0[1]+hp->dx)/centroid_out[1];
-						else if(fout == 2) r_out = (x0[2]+hp->dx)/centroid_out[2];
+						if(fout == 0) r_out = (x0.x+hp->dx)/centroid_out[0];
+						else if(fout == 1) r_out = (x0.y+hp->dx)/centroid_out[1];
+						else if(fout == 2) r_out = (x0.z+hp->dx)/centroid_out[2];
 						else if(fout == hp->dim) r_out = ray.rmax; //outgoing ray front 
 						//printf("Fmid_in = %.5e\n", fmid_in);
 
@@ -721,8 +877,8 @@ void update_radiation(real dt, hydro_problem* hp) {
 
 						fmid_out = fmid_in*exp(-k*hp->grid[flatind].rho*(r_out-r_in));
 
-						if(grind[0] >= 0 && grind[0] < hp->nx[0]
-								&& grind[1] >= 0 && grind[1] < hp->nx[1]) {
+						if(grind.i >= 0 && grind.i < hp->nx.i
+								&& grind.j >= 0 && grind.j < hp->nx.j) {
 	
 							// calculate the outgoing flux, write out the radiation energy density 
 							// TODO: interpolate the mean value using the exponential
@@ -732,8 +888,10 @@ void update_radiation(real dt, hydro_problem* hp) {
 							// update hydro terms by conserving the difference
 							// between downwind and upwind fluxes
 							//hp->grid[flatind].etot += fmid_in-fmid_out; 
-							//hp->grid[flatind].mom[0] += lsgn[0]*cos(thmid)*(fmid_in-fmid_out)/CLIGHT; // TODO: review this!
-							//hp->grid[flatind].mom[1] += lsgn[1]*sin(thmid)*(fmid_in-fmid_out)/CLIGHT; 
+		psi_reduce(&beam_poly, moments, 0, 0);
+		printf("Original beam, mom[0] = %.5e:\n", moments[0]*hp->nrays);
+							//hp->grid[flatind].mom[0] += lsgn.i*cos(thmid)*(fmid_in-fmid_out)/CLIGHT; // TODO: review this!
+							//hp->grid[flatind].mom[1] += lsgn.j*sin(thmid)*(fmid_in-fmid_out)/CLIGHT; 
 						}
 	
 						// update the outgoing ray fluxes and momenta
@@ -759,263 +917,11 @@ void update_radiation(real dt, hydro_problem* hp) {
 				ray_flux_out += flux_out[hp->dim];
 
 				//exit(0);
+				next_cell: continue;
 			}
-			ray.Ftot = ray_flux_out;
-			hp->rays[hp->nrays++] = ray;
 		}
+#endif
 
-		else if(hp->dim == 2) {
-		
-			// allocate an array of flux information
-			// fill in grid indices and polar coordinates 
-			// then loop over all rays, processing their geometry and fluxes
-			struct {
-				real flux_in[hp->dim+1];
-				real fmom_in[hp->dim+1];
-				real r2;
-			} voxdata[nbox[0]+1][nbox[1]+1];
-			memset(voxdata, 0, sizeof(voxdata));
-			for(ii = 0; ii <= nbox[0]; ++ii)
-			for(jj = 0; jj <= nbox[1]; ++jj) {
-				x0[0] = hp->dx*(ibox[0][0]+ii-0.5);
-				x0[1] = hp->dx*(ibox[0][1]+jj-0.5);
-				voxdata[ii][jj].r2 = x0[0]*x0[0] + x0[1]*x0[1];
-			}
-	
-	
-			printf("Looping...\n");
-	
-			ray_flux_out = 0.0;
-			ray_mom_out = 0.0;
-			for(ii = 0; ii < nbox[0]; ++ii)
-			for(jj = 0; jj < nbox[1]; ++jj) {
-	
-				if(ii >= hp->nx[0])  continue; 
-				if(jj >= hp->nx[1])  continue; 
-	
-	
-				grind[0] = lsgn[0]*(ibox[0][0] + ii) + ray.orcell[0];
-				grind[1] = lsgn[1]*(ibox[0][1] + jj) + ray.orcell[1];
-				x0[0] = hp->dx*(ibox[0][0]+ii-0.5);
-				x0[1] = hp->dx*(ibox[0][1]+jj-0.5);
-				flatind = flat_index(grind, hp);
-	
-				// get the bitmask for this voxel telling us the 
-				// incoming and outgoing ray geometry
-				rminbits = 0;
-				rmaxbits = 0;
-				for(v = 0; v < (1<<hp->dim); ++v) {
-					rmin2[v] = voxdata[ii+((v>>0)&1)][jj+((v>>1)&1)].r2 - ray.rmin*ray.rmin;
-					rminbits |= (rmin2[v] > 0.0)<<v;
-					rmax2[v] = ray.rmax*ray.rmax - voxdata[ii+((v>>0)&1)][jj+((v>>1)&1)].r2;
-					rmaxbits |= (rmax2[v] > 0.0)<<v;
-				}
-				if(ray.orcell[0] == grind[0] && ray.orcell[1] == grind[1]) 
-					rminbits = 0xFF; // special case for the origin cell 
-				if(!(rminbits && rmaxbits)) continue;
-	
-				// incoming ray cases
-				memset(faces_in, 0, sizeof(faces_in));
-				switch(rminbits) {
-					case 0x08:
-						tmpverts[1][0] = x0[0] + hp->dx; 
-						tmpverts[1][1] = sqrt(x0[1]*x0[1]-rmin2[1]); 
-						tmpverts[2][0] = sqrt(x0[0]*x0[0]-rmin2[2]); 
-						tmpverts[2][1] = x0[1] + hp->dx; 
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_in[hp->dim], hp);
-						break;
-					case 0x0A:
-						tmpverts[0][0] = x0[0] + hp->dx; 
-						tmpverts[0][1] = x0[1]; 
-						tmpverts[1][0] = sqrt(x0[0]*x0[0]-rmin2[0]); 
-						tmpverts[1][1] = x0[1]; 
-						tmpverts[2][0] = sqrt(x0[0]*x0[0]-rmin2[2]); 
-						tmpverts[2][1] = x0[1] + hp->dx; 
-						add_clip_faces(tmpverts[0], tmpverts[1], &faces_in[1], hp);
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_in[hp->dim], hp);
-						break;
-					case 0x0C:
-						tmpverts[1][0] = x0[0] + hp->dx; 
-						tmpverts[1][1] = sqrt(x0[1]*x0[1]-rmin2[1]); 
-						tmpverts[2][0] = x0[0];
-						tmpverts[2][1] = sqrt(x0[1]*x0[1]-rmin2[0]); 
-						tmpverts[3][0] = x0[0]; 
-						tmpverts[3][1] = x0[1] + hp->dx; 
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_in[hp->dim], hp);
-						add_clip_faces(tmpverts[2], tmpverts[3], &faces_in[0], hp);
-						break;
-					case 0x0E:
-						tmpverts[0][0] = x0[0] + hp->dx; 
-						tmpverts[0][1] = x0[1]; 
-						tmpverts[1][0] = sqrt(x0[0]*x0[0]-rmin2[0]); 
-						tmpverts[1][1] = x0[1]; 
-						tmpverts[2][0] = x0[0]; 
-						tmpverts[2][1] = sqrt(x0[1]*x0[1]-rmin2[0]); 
-						tmpverts[3][0] = x0[0]; 
-						tmpverts[3][1] = x0[1] + hp->dx; 
-						add_clip_faces(tmpverts[0], tmpverts[1], &faces_in[1], hp);
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_in[hp->dim], hp);
-						add_clip_faces(tmpverts[2], tmpverts[3], &faces_in[0], hp);
-						break;
-					case 0x0F:
-						tmpverts[0][0] = x0[0] + hp->dx; 
-						tmpverts[0][1] = x0[1];
-						tmpverts[1][0] = x0[0];
-						tmpverts[1][1] = x0[1];
-						tmpverts[2][0] = x0[0];
-						tmpverts[2][1] = x0[1] + hp->dx;
-						add_clip_faces(tmpverts[0], tmpverts[1], &faces_in[1], hp);
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_in[0], hp);
-						break;
-					case 0xFF: // special case for the ray origin
-						// TODO: is this needed when clipping beam polys??
-						add_clip_faces(beam_poly.verts[0].pos, beam_poly.verts[1].pos, &faces_in[hp->dim], hp);
-						break;
-					default: 
-						printf("Bad incoming bit mask! How can this be?? 0x%x\n", rminbits);
-						exit(0);
-						break;
-				}
-	
-				// outgoing ray cases
-				memset(faces_out, 0, sizeof(faces_out));
-				switch(rmaxbits) {
-					case 0x07:
-						tmpverts[0][0] = x0[0] + hp->dx; 
-						tmpverts[0][1] = x0[1]; 
-						tmpverts[1][0] = x0[0] + hp->dx; 
-						tmpverts[1][1] = sqrt(x0[1]*x0[1]+rmax2[1]); 
-						tmpverts[2][0] = sqrt(x0[0]*x0[0]+rmax2[2]); 
-						tmpverts[2][1] = x0[1]+hp->dx; 
-						tmpverts[3][0] = x0[0]; 
-						tmpverts[3][1] = x0[1]+hp->dx; 
-						add_clip_faces(tmpverts[0], tmpverts[1], &faces_out[0], hp);
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_out[hp->dim], hp);
-						add_clip_faces(tmpverts[2], tmpverts[3], &faces_out[1], hp);
-						break;
-					case 0x05:
-						tmpverts[1][0] = sqrt(x0[0]*x0[0]+rmax2[0]); 
-						tmpverts[1][1] = x0[1]; 
-						tmpverts[2][0] = sqrt(x0[0]*x0[0]+rmax2[2]); 
-						tmpverts[2][1] = x0[1] + hp->dx; 
-						tmpverts[3][0] = x0[0]; 
-						tmpverts[3][1] = x0[1] + hp->dx; 
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_out[hp->dim], hp);
-						add_clip_faces(tmpverts[2], tmpverts[3], &faces_out[1], hp);
-						add_clip_faces(tmpverts[1], tmpverts[3], &faces_in[1], hp);
-						break;
-					case 0x03:
-						tmpverts[0][0] = x0[0] + hp->dx; 
-						tmpverts[0][1] = x0[1]; 
-						tmpverts[1][0] = x0[0] + hp->dx; 
-						tmpverts[1][1] = sqrt(x0[1]*x0[1]+rmax2[1]); 
-						tmpverts[2][0] = x0[0];
-						tmpverts[2][1] = sqrt(x0[1]*x0[1]+rmax2[0]); 
-						add_clip_faces(tmpverts[0], tmpverts[1], &faces_out[0], hp);
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_out[hp->dim], hp);
-						add_clip_faces(tmpverts[0], tmpverts[2], &faces_in[0], hp);
-						break;
-					case 0x01:
-						tmpverts[1][0] = sqrt(x0[0]*x0[0]+rmax2[0]); 
-						tmpverts[1][1] = x0[1]; 
-						tmpverts[2][0] = x0[0]; 
-						tmpverts[2][1] = sqrt(x0[1]*x0[1]+rmax2[0]); 
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_out[hp->dim], hp);
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_in[0], hp);
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_in[1], hp);
-						break;
-					case 0x0F:
-						tmpverts[0][0] = x0[0] + hp->dx; 
-						tmpverts[0][1] = x0[1];
-						tmpverts[1][0] = x0[0] + hp->dx;
-						tmpverts[1][1] = x0[1] + hp->dx;
-						tmpverts[2][0] = x0[0];
-						tmpverts[2][1] = x0[1] + hp->dx;
-						add_clip_faces(tmpverts[0], tmpverts[1], &faces_out[0], hp);
-						add_clip_faces(tmpverts[1], tmpverts[2], &faces_out[1], hp);
-						break;
-					default: 
-						printf("Bad outgoing bit mask! How can this be?? 0x%x\n", rmaxbits);
-						exit(0);
-						break;
-				}
-	
-				// compute pairwise intersections between in, out faces
-				// to get the outgoing fluxes
-				memset(flux_out, 0, sizeof(flux_out));
-				memset(fmom_out, 0, sizeof(fmom_out));
-				for(fin = 0; fin <= hp->dim; ++fin) {
-					ftin = faces_in[fin];
-					inpoly = beam_poly;
-					clip_beam_poly(&inpoly, &ftin, &domega_in, &centroid_in, hp);
-					if(domega_in <= 0.0) continue;
-	
-					// set the incoming flux from the beam front 
-					// and get the intensity
-					// TODO: numerical stability??
-					if(fin == hp->dim) 
-						voxdata[ii][jj].flux_in[fin] = ray.Ftot*domega_in/ray_omega;
-					intensity_in = voxdata[ii][jj].flux_in[fin]/domega_in;
-	
-					for(fout = 0; fout <= hp->dim; ++fout) {
-						ftout = faces_out[fout];
-						outpoly = inpoly;
-						clip_beam_poly(&outpoly, &ftout, &domega_out, &centroid_out, hp);
-						if(domega_out <= 0.0) continue;
-	
-						// track a solid beam between the two faces
-						// calculate the optical depth to first order in theta
-						real k = 00.0;
-						fmid_in = intensity_in*domega_out;
-	
-						// get the correct inner and outer radii, then attenuate exponentially 
-						rmid[0] = 0.5*(outpoly.verts[0].pos[0]+outpoly.verts[1].pos[0]);
-						rmid[1] = 0.5*(outpoly.verts[0].pos[1]+outpoly.verts[1].pos[1]);
-						len = sqrt(rmid[0]*rmid[0]+rmid[1]*rmid[1]);
-						secthmid = len/rmid[0]; 
-						cscthmid = len/rmid[1];
-						if(fin == 0) r_in = x0[0]*secthmid; // x-facing faces
-						else if(fin == 1) r_in = x0[1]*cscthmid; // y-facing faces
-						else if(fin == hp->dim) r_in = ray.rmin; // incoming ray front 
-						if(rminbits == 0xFF) r_in = 0.0; // TODO: why is this needed??
-						if(fout == 0) r_out = (x0[0]+hp->dx)*secthmid;
-						else if(fout == 1) r_out = (x0[1]+hp->dx)*cscthmid;
-						else if(fout == hp->dim) r_out = ray.rmax; //outgoing ray front 
-	
-						// update grid hydro only if we are in a non-ghost cell
-						fmid_out = fmid_in;
-						if(grind[0] >= 0 && grind[0] < hp->nx[0]
-								&& grind[1] >= 0 && grind[1] < hp->nx[1]) {
-	
-							// calculate the outgoing flux, write out the radiation energy density 
-							// TODO: interpolate the mean value using the exponential
-							fmid_out = fmid_in*exp(-k*hp->grid[flatind].rho*(r_out-r_in));
-							hp->rad_grid[flatind].E += 0.5*(fmid_in+fmid_out)*(r_out-r_in)/(ray.rmax-ray.rmin)/(hp->dx*hp->dx);
-		
-							// update hydro terms by conserving the difference
-							// between downwind and upwind fluxes
-							hp->grid[flatind].etot += fmid_in-fmid_out; 
-							//hp->grid[flatind].mom[0] += lsgn[0]*cos(thmid)*(fmid_in-fmid_out)/CLIGHT; // TODO: review this!
-							//hp->grid[flatind].mom[1] += lsgn[1]*sin(thmid)*(fmid_in-fmid_out)/CLIGHT; 
-						}
-	
-						// update the outgoing ray fluxes and momenta
-						flux_out[fout] += fmid_out; 
-					}
-				}
-	
-				// finally, compute the flux and moment through to the next cell
-				voxdata[ii+1][jj].flux_in[0] = flux_out[0];
-				voxdata[ii][jj+1].flux_in[1] = flux_out[1];
-				ray_flux_out += flux_out[hp->dim];
-			}
-			ray.Ftot = ray_flux_out;
-			hp->rays[hp->nrays++] = ray;
-
-		
-		}
-	}
-}
 
 
 

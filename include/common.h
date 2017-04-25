@@ -12,6 +12,9 @@
 #ifndef COMMON_H_
 #define COMMON_H_
 
+#include <stdio.h>
+#include <string.h>
+
 // macros for named acces to state and flux arrays
 #define RHO 0
 #define ENERGY 1
@@ -35,8 +38,16 @@
 
 // real type
 typedef double real;
-typedef real rvec[3]; 
-typedef int dvec[3];
+
+typedef union {
+	struct { real x, y, z; };
+	real xyz[3]; 
+} rvec;
+
+typedef union {
+	struct { int i, j, k; };
+	int ijk[3]; 
+} dvec;
 
 typedef struct {
 	real rho; // density
@@ -68,7 +79,7 @@ typedef struct {
 	long angle_id;
 	real rmin, rmax; // the inner and outer radius for the timestep 
 	//rvec origin; // the source location 
-	dvec orcell; // the source location 
+	rvec origin; // the source location 
 	real Ftot, Fcom;	
 } hydro_ray;
 
