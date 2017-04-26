@@ -543,33 +543,6 @@ void update_radiation(real dt, hydro_problem* hp) {
 						add_clip_faces(cubeverts[3], cubeverts[2], &faces_in[2], hp);
 						add_clip_faces(cubeverts[1], cubeverts[3], &faces_in[2], hp);
 						break;
-
-
-					case 0xF0:
-						printf("0xf0\n");
-
-						add_clip_faces(cubeverts[4], cubeverts[0], &faces_in[0], hp);
-						add_clip_faces(cubeverts[6], cubeverts[4], &faces_in[0], hp);
-						add_clip_faces(cubeverts[2], cubeverts[6], &faces_in[0], hp);
-						add_clip_faces(cubeverts[0], cubeverts[2], &faces_in[0], hp);
-
-
-
-
-
-
-						add_clip_faces(cubeverts[1], cubeverts[0], &faces_in[1], hp);
-						add_clip_faces(cubeverts[5], cubeverts[1], &faces_in[1], hp);
-						add_clip_faces(cubeverts[4], cubeverts[5], &faces_in[1], hp);
-						add_clip_faces(cubeverts[0], cubeverts[4], &faces_in[1], hp);
-						add_clip_faces(cubeverts[0], cubeverts[1], &faces_in[2], hp);
-						add_clip_faces(cubeverts[2], cubeverts[0], &faces_in[2], hp);
-						add_clip_faces(cubeverts[3], cubeverts[2], &faces_in[2], hp);
-						add_clip_faces(cubeverts[1], cubeverts[3], &faces_in[2], hp);
-
-						break;
-
-
 					case 0xFFFF: // ray origin, already set the flux
 						//add_clip_faces(beam_poly.verts[0].pos, beam_poly.verts[1].pos, &faces_in[3], hp);
 						//add_clip_faces(beam_poly.verts[1].pos, beam_poly.verts[2].pos, &faces_in[3], hp);
@@ -601,42 +574,8 @@ void update_radiation(real dt, hydro_problem* hp) {
 						add_clip_faces(cubeverts[6], cubeverts[4], &faces_out[2], hp);
 						break;
 					default:
-						//printf("outgoing 0x%x\n", rmaxbits);
-
-						//int vcur, vnext, vcurgood, vnextgood, ax;
-
-						//for(vcur = 0; vcur < 8; ++vcur) {
-
-							//vcurgood = ((rmaxbits>>vcur)&1);
-							//if(!vcurgood) continue;
-
-							//printf(" vert %d is inside\n", vcur);
-
-
-
-							//for(ax = 0; ax < hp->dim; ++ax) {
-								//vnext = vcur^(1<<ax); // the next vertex along this axis
-								//vnextgood = ((rmaxbits>>vnext)&1);
-
-								//if(vnextgood) continue;
-
-								//// vcur and vnext are on opposite sides!
-
-								//printf("Found bisected edge between verts %d, %d\n", vcur, vnext);
-							
-							
-							
-							//}
-						
-						//}
-
 						hp->rad_grid[flatind].E = 1.0; 
-
 						continue;
-
-
-						//printf("Bad outgoing bit mask! How can this be?? 0x%x\n", rmaxbits);
-						//exit(0);
 						break;
 				}
 
