@@ -335,7 +335,7 @@ void evolve(real tstop, int max_steps, int output_every, hydro_problem* hp) {
 		// time step based on CFL condition
 		alpha_max = get_max_char_speed(hp);
 		hp->dt = hp->cfl_fac*hp->dx/alpha_max;
-		hp->dt = 0.0002; 
+		hp->dt = 0.0001; 
 		if(hp->time + hp->dt > tstop) {
 			hp->dt = tstop - hp->time;
 			done = 1;

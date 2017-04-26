@@ -65,12 +65,18 @@ typedef struct {
 
 #define CLIGHT 1000.0
 typedef struct {
-	long angle_id;
-	real rmin, rmax; // the inner and outer radius for the timestep 
-	//rvec origin; // the source location 
-	dvec orcell; // the source location 
-	real Ftot, Fcom;	
+	long source_id; // id of the source (may be a supersource) with which the ray is associated
+	dvec grind;
+	int face_id;
+	//long face_id; // id of the cell and face with which the ray is currently associated
+	real r; // the radius from the source to which the ray has propagated 
+	real f; // the total flux carried by the ray 
 } hydro_ray;
+
+typedef struct { 
+	rvec pos;
+	real dndt;
+} rad_source;
 
 typedef struct {
 	real mass; // total mass 
