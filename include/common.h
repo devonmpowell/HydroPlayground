@@ -12,6 +12,8 @@
 #ifndef COMMON_H_
 #define COMMON_H_
 
+#include <stdint.h>
+
 // macros for named acces to state and flux arrays
 #define RHO 0
 #define ENERGY 1
@@ -65,10 +67,8 @@ typedef struct {
 
 #define CLIGHT 1000.0
 typedef struct {
-	long source_id; // id of the source (may be a supersource) with which the ray is associated
-	dvec grind;
+	int source_id;
 	int face_id;
-	//long face_id; // id of the cell and face with which the ray is currently associated
 	real r; // the radius from the source to which the ray has propagated 
 	real f; // the total flux carried by the ray 
 } hydro_ray;

@@ -260,13 +260,12 @@ def _default_plots(self, fsz=8):
         imargs = {'interpolation': 'nearest', 'origin': 'lower', 'extent': [0,1,0,1], 'cmap':
                 plt.cm.RdBu_r}
         rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nx[2]/2]), **imargs)
-
-
-        #cax = self.fig.add_axes([ax[0].get_position().x1, 0.31, 0.01, 0.48])
-        #self.fig.colorbar(rhorad, cax=cax)
-
         rhorad = ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nx[1]/2,self.nghosts:-self.nghosts]), **imargs)
-        rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][(7*self.nx[0])/8,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+        rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][(5*self.nx[0])/8,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+
+        #rhorad = ax[0].imshow(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,:],axis=0), **imargs)
+        #rhorad = ax[1].imshow(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,:,self.nghosts:-self.nghosts],axis=1), **imargs)
+        #rhorad = ax[2].imshow(np.sum(self.pyradgrid['E'][:,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts],axis=2), **imargs)
 
 
         #ax[1].imshow(vel, **imargs)
@@ -411,7 +410,7 @@ class HydroProblem(Structure):
             print "\nSetting up the radiation field buffer..."
         self.rdtype = np.dtype([('angle_id', np.int64), ('rmin', np.float64), ('rmax', np.float64), \
             ('orcell', np.int32, (4,)), ('I', np.float64, 2),]) 
-        self.pyrad = np.zeros(16000, dtype=self.rdtype)
+        self.pyrad = np.zeros(16000000, dtype=self.rdtype)
         self.nrays = 0
 
         # Testing the radiation energy density
