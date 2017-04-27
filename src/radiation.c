@@ -150,7 +150,7 @@ void clip_beam_poly(solid_angle_poly* poly, rvec* clipnorms, int nclip) {
 }
 
 
-void reduce_beam_poly(solid_angle_poly* poly, real* omega) {
+void reduce_beam_poly(solid_angle_poly* poly, real* omega, rvec* centroid) {
 
 	int v;
 	real len;
@@ -176,51 +176,20 @@ void reduce_beam_poly(solid_angle_poly* poly, real* omega) {
 	meanvec[1] /= len;
 	meanvec[2] /= len;
 
+	(*centroid)[0] = 0;
+	(*centroid)[1] = 0;
+	(*centroid)[2] = 0;
 	for(v = 0; v < poly->nverts; ++v) {
 		real mydo = domega3(poly->verts[v].pos, poly->verts[poly->verts[v].pnbrs[1]].pos, meanvec); 
 		*omega += mydo; 
+		(*centroid)[0] += mydo*(poly->verts[v].pos[0] +  poly->verts[poly->verts[v].pnbrs[1]].pos[0] +  meanvec[0]);
+		(*centroid)[1] += mydo*(poly->verts[v].pos[1] +  poly->verts[poly->verts[v].pnbrs[1]].pos[1] +  meanvec[1]);
+		(*centroid)[2] += mydo*(poly->verts[v].pos[2] +  poly->verts[poly->verts[v].pnbrs[1]].pos[2] +  meanvec[2]);
 	}
-#if 0
-		if(poly->nverts) { //} && faces->nclip) {
-
-			// compute the final solid angle for this poly
-			rvec meanvec;
-			memset(meanvec, 0, sizeof(meanvec));
-			for(v = 0; v < poly->nverts; ++v) {
-				len = sqrt(poly->verts[v].pos[0]*poly->verts[v].pos[0]
-					+poly->verts[v].pos[1]*poly->verts[v].pos[1]+poly->verts[v].pos[2]*poly->verts[v].pos[2]);
-				poly->verts[v].pos[0] /= len;
-				poly->verts[v].pos[1] /= len;
-				poly->verts[v].pos[2] /= len;
-				meanvec[0] += poly->verts[v].pos[0];
-				meanvec[1] += poly->verts[v].pos[1];
-				meanvec[2] += poly->verts[v].pos[2];
-			}
-
-			len = sqrt(meanvec[0]*meanvec[0]+meanvec[1]*meanvec[1]+meanvec[2]*meanvec[2]);
-			meanvec[0] /= len;
-			meanvec[1] /= len;
-			meanvec[2] /= len;
-
-			(*centroid)[0] = 0;
-			(*centroid)[1] = 0;
-			(*centroid)[2] = 0;
-			for(v = 0; v < poly->nverts; ++v) {
-				real mydo = domega3(poly->verts[v].pos, poly->verts[poly->verts[v].pnbrs[1]].pos, meanvec); 
-				*domega += mydo; 
-				(*centroid)[0] += mydo*(poly->verts[v].pos[0] +  poly->verts[poly->verts[v].pnbrs[1]].pos[0] +  meanvec[0]);
-				(*centroid)[1] += mydo*(poly->verts[v].pos[1] +  poly->verts[poly->verts[v].pnbrs[1]].pos[1] +  meanvec[1]);
-				(*centroid)[2] += mydo*(poly->verts[v].pos[2] +  poly->verts[poly->verts[v].pnbrs[1]].pos[2] +  meanvec[2]);
-			}
-			len = sqrt((*centroid)[0]*(*centroid)[0]+(*centroid)[1]*(*centroid)[1]+(*centroid)[2]*(*centroid)[2]);
-			(*centroid)[0] /= len;
-			(*centroid)[1] /= len;
-			(*centroid)[2] /= len;
-		}
-	}
-
-
-#endif
+	len = sqrt((*centroid)[0]*(*centroid)[0]+(*centroid)[1]*(*centroid)[1]+(*centroid)[2]*(*centroid)[2]);
+	(*centroid)[0] /= len;
+	(*centroid)[1] /= len;
+	(*centroid)[2] /= len;
 }
 
 
@@ -231,9 +200,9 @@ void update_radiation(real dt, hydro_problem* hp) {
 		flatind, ii, jj, kk, quadrant, qid, rlvl, f, nbase, split, face_id;
 	dvec lsgn, grind, ibox[2], nbox;
 	real ray_mom_out, fmom_in, domega_in, domega_out, intensity_in, dobase, 
-		 ray_flux_out, err, allmin, allmax, r_in, r_out, secthmid, len, ray_omega, flux, 
+		 ray_flux_out, err, allmin, allmax, r_in, r_out, secthmid, len, ray_omega, flux, flux_in, flux_out, 
 		 cscthmid, inmin, inmax, outmin, outmax, fmid_in, fmid_out, omega, sum, omega_in, omega_out;
-	real rmin2[4], rmax2[4], flux_out[4], fmom_out[4];
+	real rmin2[4], rmax2[4];
 	rvec x0, rmid, tmpverts[8], ntmp, v0, v1;
 	hydro_ray ray, r0, r1, rtmp;
 	solid_angle_poly beam_poly, inpoly, outpoly;
@@ -298,6 +267,8 @@ void update_radiation(real dt, hydro_problem* hp) {
 		solid_angle_poly tpoly;
 		solid_angle_poly curpoly;
 
+		rvec centroid;
+
 		const static int neighbor_face_indices[6][4] = {
 			{3,7,5,1},{4,6,2,0},{6,7,3,2},{1,5,4,0},{5,7,6,4},{2,3,1,0}};
 		const static int neighbor_grid_offsets[6][3] = {
@@ -315,7 +286,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 					curpoly.verts[v].pnbrs[0] = (v-1+4)%4;
 					curpoly.verts[v].pnbrs[1] = (v+1)%4;
 				}
-				reduce_beam_poly(&curpoly, &omega);
+				reduce_beam_poly(&curpoly, &omega, &centroid);
 				sum += omega;
 
 				// push this poly onto the stack, tagging it as entering the corresponding
@@ -348,9 +319,9 @@ void update_radiation(real dt, hydro_problem* hp) {
 				curpoly.verts[v].pnbrs[1] = (v-1+4)%4;
 				curpoly.verts[v].pnbrs[0] = (v+1)%4;
 			}
-			reduce_beam_poly(&curpoly, &omega);
+			reduce_beam_poly(&curpoly, &omega, &centroid);
 			beam_stack[nstack].poly = curpoly;
-			beam_stack[nstack].fid = 2*(ray.face_id/2)-(ray.face_id%2)+1; // flip the face index around to outgoing status 
+			beam_stack[nstack].fid = ray.face_id^1;
 			for(ax = 0; ax < 3; ++ax)
 				beam_stack[nstack].grind[ax] = ray.grind[ax];
 			beam_stack[nstack].f = ray.f;
@@ -368,7 +339,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 			// skip if we have no flux or solid angle to work with
 			nstack--;
 			curpoly = beam_stack[nstack].poly;
-			face_id = 2*(beam_stack[nstack].fid/2)-(beam_stack[nstack].fid%2)+1; // flip the face index around to outgoing status 
+			face_id = beam_stack[nstack].fid^1; // flip the face index around to outgoing status 
 			flux = beam_stack[nstack].f;
 			omega_in = beam_stack[nstack].o;
 			memcpy(grind, beam_stack[nstack].grind, sizeof(grind));
@@ -392,23 +363,33 @@ void update_radiation(real dt, hydro_problem* hp) {
 				}
 			}
 
-			// now, clip against each of the new downwind faces, tracking fractions 
+			// clip against each of the new downwind faces, tracking fractions 
 			// of the solid angle through from the upwind face
+			// attentuate exponentially via the mean optical depth
 			for(f = 0, sum = 0.0; f < 6; ++f) {
 				if(f == face_id) continue;
 				for(v = 0; v < 4; ++v)
 					cross3(clipnorms[v], cubeverts[neighbor_face_indices[f][v]], cubeverts[neighbor_face_indices[f][(v+1)%4]]);
 				tpoly = curpoly;
 				clip_beam_poly(&tpoly, clipnorms, 4);
-				reduce_beam_poly(&tpoly, &omega_out);
+				reduce_beam_poly(&tpoly, &omega_out, &centroid);
 				if(omega_out > 0.0) {
-
-					// process the fragment through the cell
-					// get the mean optical depth and momentum transfer as well
-					flatind = flat_index(grind, hp);
-					hp->rad_grid[flatind].E += flux*omega_out/omega_in; 
 					sum += omega_out;
 	
+					// get the mean optical depth
+					// get the correct inner and outer radii, then attenuate exponentially 
+					// TODO: cleaner logic expressions here
+					if(face_id == 7) r_in = 0.0; // TODO: should put this in the subgrid sourcing model
+					else r_in = (hp->dx*(grind[face_id/2]+(1-face_id%2))-cs.pos[face_id/2])/centroid[face_id/2];
+					r_out = (hp->dx*(grind[f/2]+(1-f%2))-cs.pos[f/2])/centroid[f/2];
+
+					// update the energy density on the grid
+					flatind = flat_index(grind, hp);
+					real k = 0.0;
+					flux_in = flux*omega_out/omega_in;
+					flux_out = flux_in*exp(-k*hp->grid[flatind].rho*(r_out-r_in)); 
+					hp->rad_grid[flatind].E += 0.5*(flux_in+flux_out)*(r_out-r_in)/(CLIGHT*dt)/(hp->dx*hp->dx);
+
 					// push this poly onto the stack, tagging it as entering the corresponding
 					// neighboring grid cell
 					// TODO: must propagate and attenuate!
@@ -416,7 +397,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 					beam_stack[nstack].fid = f;
 					for(ax = 0; ax < 3; ++ax)
 						beam_stack[nstack].grind[ax] = grind[ax] + neighbor_grid_offsets[f][ax];
-					beam_stack[nstack].f = flux*omega_out/omega_in;
+					beam_stack[nstack].f = flux_out; 
 					beam_stack[nstack].o = omega_out; 
 					nstack++;			
 				}
@@ -439,12 +420,13 @@ void update_radiation(real dt, hydro_problem* hp) {
 		
 	// compress the ray list down, removing rays with no flux
 	ornrays = hp->nrays;
-	hp->nrays = 0.0;
+	hp->nrays = 0;
 	for(r = 0; r < ornrays; ++r) {
 		ray = hp->rays[r];
 		if(ray.f <= 0.0) continue;
 		hp->rays[hp->nrays++] = ray;
 	}
+	printf("NUM RAYS = %d\n", hp->nrays);
 }
 
 
