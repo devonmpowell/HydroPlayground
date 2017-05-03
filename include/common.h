@@ -45,7 +45,8 @@ typedef struct {
 	rvec mom; // momentum
 	rvec com; // the first moment in position 
 	real etot; // total energy
-	// real x; // the ionization fraction
+	 real x; // the ionization fraction
+	 real dN; // the ionization rate 
 #ifdef RADIATION
 #endif
 } hydro_vector;
@@ -65,7 +66,7 @@ typedef struct {
 
 #define RAY_BASE_BITS(x) ((x)&((1<<hp->dim)-1))
 
-#define CLIGHT 1000.0
+#define CLIGHT 1.064 // in kpc/Myr 
 typedef struct {
 	int source_id;
 	int face_id;

@@ -47,14 +47,16 @@ int sort_helper(const void *a, const void *b);
 
 void update_radiation(real dt, hydro_problem* hp) {
 
+	setbuf(stdout, NULL);
+
 	// all variables up top
-	int v, r, f, ax, ornrays, flatind, face_id,
-		cell_id, nsources, b, source_id, nstack;
+	int v, r, i, f, ax, ornrays, flatind, face_id,
+		cell_id, nsources, b, source_id, nstack, nbuf, ornbuf;
 	dvec grind;
 	real sum, omega, flux, omega_in, omega_out, err, r_in, r_out,
-		 flux_in, flux_out;
+		 flux_in, flux_out, r2, rhov;
 	rvec centroid, clipnorms[4], cubeverts[8];
-	hydro_ray ray, rtmp;
+	hydro_ray ray, rtmp, frag_buffer[4024];
 	solid_angle_poly tpoly, curpoly;
 	rad_source cs;
 	const static int neighbor_face_indices[6][4] = {
@@ -73,10 +75,23 @@ void update_radiation(real dt, hydro_problem* hp) {
 	rad_source sources[10];
 	nsources = 0;
 	for(ax = 0; ax < 3; ++ax)
-		sources[nsources].pos[ax] = hp->dx*(hp->nx[ax]+1)/2; //+ax+0.342)/2; 
-	//sources[nsources].pos[1] -= 0.2;
-	sources[nsources].dndt = 1.0;
+		sources[nsources].pos[ax] = hp->dx*(hp->nx[ax]+1)/2;
+		//sources[nsources].pos[ax] = hp->dx*0.0001;
+	sources[nsources].dndt = 1.577e2; // photons per Myr
 	nsources++;
+
+	//for(ax = 0; ax < 3; ++ax)
+		//sources[nsources].pos[ax] = hp->dx*(hp->nx[ax]+1)/2; //+ax+0.342)/2; 
+	//sources[nsources].pos[1] = hp->dx*(hp->nx[1]+1)*30/64; //+ax+0.342)/2; 
+	//sources[nsources].pos[2] = hp->dx*(hp->nx[2]+1)*28/64; //+ax+0.342)/2; 
+	//sources[nsources].dndt = 1.0;
+	//nsources++;
+
+	//for(ax = 0; ax < 3; ++ax)
+		//sources[nsources].pos[ax] = hp->dx*(hp->nx[ax]+1)/2; //+ax+0.342)/2; 
+	//sources[nsources].pos[1] = hp->dx*(hp->nx[1]+1)/4; //+ax+0.342)/2; 
+	//sources[nsources].dndt = 1.0;
+	//nsources++;
 
 
 	// STEP 1: source new rays 
@@ -94,11 +109,15 @@ void update_radiation(real dt, hydro_problem* hp) {
 		ray.r = 0.0;
 		ray.f = dt*sources[source_id].dndt;
 		hp->rays[hp->nrays++] = ray;
-		if(hp->nrays > 160000) printf("Error! Overflowed ray buffer.\n");
+		if(hp->nrays > 1600000) printf("Error! Overflowed ray buffer.\n");
 	}
+
+	real total_omega_in = 0.0;
 
 	// Step 3: propagate all rays forward by c*dt
 	memset(hp->rad_grid, 0, (hp->nx[0]+4)*(hp->nx[1]+4)*(hp->nx[2]+4)*sizeof(rad_vector));
+	for(i = 0; i < (hp->nx[0]+4)*(hp->nx[1]+4)*(hp->nx[2]+4); ++i)
+		hp->grid[i].dN = 0.0;
 	ornrays = hp->nrays;
 	for(r = 0; r < ornrays; ++r) {
 		ray = hp->rays[r];
@@ -119,10 +138,6 @@ void update_radiation(real dt, hydro_problem* hp) {
 			cubeverts[v][1] = hp->dx*(grind[1]+((v>>1)&1)) - cs.pos[1]; 
 			cubeverts[v][2] = hp->dx*(grind[2]+((v>>2)&1)) - cs.pos[2]; 
 		}
-
-		//printf("Ray %d, id = %d, radius = %.5e\n", r, ray.face_id, ray.r);
-		//printf("Starting grid index = %d %d %d\n", grind[0], grind[1], grind[2]);
-		//printf("cell_id = %d, face_id = %d, source_id = %d\n", cell_id, face_id, source_id);
 
 		// initialize the stack
 		nstack = 0;
@@ -151,6 +166,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 				beam_stack[nstack].f = ray.f*omega/(2*TWO_PI);
 				beam_stack[nstack].o = omega;
 				nstack++;
+				total_omega_in += omega;
 			}
 
 			// check that the solid angle adds to 4*pi
@@ -178,10 +194,12 @@ void update_radiation(real dt, hydro_problem* hp) {
 			beam_stack[nstack].f = ray.f;
 			beam_stack[nstack].o = omega; 
 			nstack++;
+			total_omega_in += omega; 
 		}
 
 		// now that we have initialized our beam polygon,
 		// propagate it through the grid, recursing as needed
+		nbuf = 0;
 		while(nstack) {
 
 			// pop the stack
@@ -194,6 +212,10 @@ void update_radiation(real dt, hydro_problem* hp) {
 			memcpy(grind, beam_stack[nstack].grind, sizeof(grind));
 			if(flux <= 0.0) continue;
 			if(omega_in <= 0.0) continue;
+			// TODO: hacky BCs
+			if(grind[0] < 0 || grind[0] >= hp->nx[0]) continue;
+			if(grind[1] < 0 || grind[1] >= hp->nx[1]) continue;
+			if(grind[2] < 0 || grind[2] >= hp->nx[2]) continue;
 
 			// check the grid cell vertices to ensure that we propagate
 			// the entire way through during this one time-step
@@ -201,15 +223,15 @@ void update_radiation(real dt, hydro_problem* hp) {
 			for(v = 0; v < 8; ++v) {
 				for(ax = 0; ax < 3; ++ax)
 					cubeverts[v][ax] = hp->dx*(grind[ax]+((v>>ax)&1))-cs.pos[ax]; 
-				if(ray.r*ray.r < cubeverts[v][0]*cubeverts[v][0]
-						+cubeverts[v][1]*cubeverts[v][1]+cubeverts[v][2]*cubeverts[v][2]) {
+				r2 = cubeverts[v][0]*cubeverts[v][0]
+					+cubeverts[v][1]*cubeverts[v][1]+cubeverts[v][2]*cubeverts[v][2];
+				if(ray.r*ray.r < r2) {
 					rtmp = ray;
 					for(cell_id = 0, b = 0; b < 24; ++b)
 						cell_id |= ((grind[b%3]>>(b/3))&1)<<b;
 					rtmp.face_id = ((cell_id&0xFFFFFF)<<4)|(face_id&0xF);
-					rtmp.source_id = source_id; 
 					rtmp.f = flux;
-					hp->rays[hp->nrays++] = rtmp;
+					frag_buffer[nbuf++] = rtmp;
 					goto next_fragment;
 				}
 			}
@@ -224,7 +246,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 				tpoly = curpoly;
 				clip_beam_poly(&tpoly, clipnorms, 4);
 				reduce_beam_poly(&tpoly, &omega_out, &centroid);
-				if(omega_out > 0.0) {
+				if(omega_out > ERRTOL*omega_in) {
 					sum += omega_out;
 	
 					// get the mean optical depth
@@ -234,13 +256,23 @@ void update_radiation(real dt, hydro_problem* hp) {
 					// TODO: Use the cube vertices??
 					r_in = (hp->dx*(grind[face_id/2]+(1-face_id%2))-cs.pos[face_id/2])/centroid[face_id/2];
 					r_out = (hp->dx*(grind[f/2]+(1-f%2))-cs.pos[f/2])/centroid[f/2];
+					real cross_section = 6.62e-1;
 
 					// update the energy density on the grid
-					real k = 100.0;
 					flatind = flat_index(grind, hp);
 					flux_in = flux*omega_out/omega_in;
-					flux_out = flux_in*exp(-k*hp->grid[flatind].rho*(r_out-r_in)); 
+					//flux_out = flux_in*exp(-k*hp->grid[flatind].rho*(r_out-r_in)); // for absorption 
+					flux_out = flux_in*exp(-cross_section*(1.0-hp->grid[flatind].x)*hp->grid[flatind].rho*(r_out-r_in)); // for ionization
+
+					// write the radiation energy density
 					hp->rad_grid[flatind].E += 0.5*(flux_in+flux_out)*(r_out-r_in)/(CLIGHT*dt*hp->dx*hp->dx);
+
+
+					// update the ionaization fraction
+					// TODO: when to update this?? After each fragment, or save values for the whole
+					// step?
+					hp->grid[flatind].dN += (flux_in-flux_out);
+
 
 					// push this poly onto the stack, tagging it as entering the corresponding
 					// neighboring grid cell
@@ -266,30 +298,64 @@ void update_radiation(real dt, hydro_problem* hp) {
 			}
 			next_fragment: continue;
 		}
+
+
+		// sort and merge fragments before adding them to the main ray buffer
+		// finally, merge rays passing through the same face that come from the same source
+		// TODO: make this cleaner! 
+		qsort(frag_buffer, nbuf, sizeof(hydro_ray), sort_helper);
+		ornbuf = nbuf;
+		nbuf = 0;
+		ray.face_id = -1; 
+		for(b = 0; b < ornbuf; ++b) {
+			if(ray.face_id == frag_buffer[b].face_id) {
+				// flux-weight the combined radius from the source
+				// TODO: this is also hacky
+				ray.f += frag_buffer[b].f;
+				ray.r += frag_buffer[b].r*frag_buffer[b].f;
+			}
+			else {
+				if(ray.face_id > 0) {
+					ray.r /= ray.f;
+					hp->rays[hp->nrays++] = ray;
+				}
+				ray.face_id = frag_buffer[b].face_id;
+				ray.f = frag_buffer[b].f; 
+				ray.r = frag_buffer[b].f*frag_buffer[b].r; 
+			}
+		}
+		ray.r /= ray.f;
+		hp->rays[hp->nrays++] = ray;
 	}
+
 		
 	// compress the ray list down, removing rays with no flux
 	// then sort the rays by their unique face index, then loop through
 	// merge all rays in the face index from the same source
 	// TODO: do the sort and merge in one step?
+	if(hp->nrays <= 0) return;
 	ornrays = hp->nrays;
 	hp->nrays = 0;
+	real fpre = 0.0;
 	for(r = 0; r < ornrays; ++r) {
 		ray = hp->rays[r];
 		if(ray.f <= 0.0) continue;
 		hp->rays[hp->nrays++] = ray;
+		fpre += ray.f; 
 	}
-	printf("NUM RAYS = %d (pre-sort)\n", hp->nrays);
+	//printf("NUM RAYS = %d (pre-sort), fpre = %.5e\n", hp->nrays, fpre);
 	qsort(hp->rays, hp->nrays, sizeof(hydro_ray), sort_helper);
+
 
 	// finally, merge rays passing through the same face that come from the same source
 	// TODO: make this a whole source-mergeing thing, with a tree traversal, etc.
+	// TODO: make this cleaner! 
 	ornrays = hp->nrays;
 	hp->nrays = 0;
 	ray.face_id = -1; 
+	real fpost = 0.0;
 	for(r = 0; r < ornrays; ++r) {
-		if(ray.face_id == hp->rays[r].face_id) {
-			
+		if(ray.face_id == hp->rays[r].face_id && ray.source_id == hp->rays[r].source_id) {
 			// flux-weight the combined radius from the source
 			// TODO: this is also hacky
 			ray.f += hp->rays[r].f;
@@ -298,15 +364,41 @@ void update_radiation(real dt, hydro_problem* hp) {
 		else {
 			if(ray.face_id > 0) {
 				ray.r /= ray.f;
+				fpost += ray.f;
 				hp->rays[hp->nrays++] = ray;
 			}
 			ray.face_id = hp->rays[r].face_id;
+			ray.source_id = hp->rays[r].source_id;
 			ray.f = hp->rays[r].f; 
 			ray.r = hp->rays[r].f*hp->rays[r].r; 
 		}
 	}
-	printf("NUM RAYS = %d (post-sort)\n", hp->nrays);
+	ray.r /= ray.f;
+	fpost += ray.f;
+	hp->rays[hp->nrays++] = ray;
+	//printf("Counted total incoming omega = %.10e, num = %.5e\n", total_omega_in, total_omega_in/(2*TWO_PI));
+	//printf("NUM RAYS = %d (post-sort), fpost = %.5e, err = %.5e\n", hp->nrays, fpost, fabs(1.0-fpost/fpre));
+
+
+
+	// update the ionization fractions on the grid
+	for(i = 0; i < (hp->nx[0]+4)*(hp->nx[1]+4)*(hp->nx[2]+4); ++i) {
+	
+		rhov = hp->grid[i].rho*hp->dx*hp->dx*hp->dx;
+		real alpha_b = 2.78e-4;
+		//hp->grid[i].x += hp->grid[i].dN/rhov - dt*alpha_b*hp->grid[i].rho*hp->grid[i].x*hp->grid[i].x;
+
+		if(hp->grid[i].x > 1.0+ERRTOL) {
+			printf("Oh no! Ionization fraction is too high! %.10f\n", hp->grid[i].x);
+			hp->grid[i].x = 1.0;
+		}
+	}
+
 }
+
+
+//void sort_and_merge_buffer(hydro_ray* src, int* nsrc, hydro_ray* dest, int*ndest) {
+//}
 
 
 void reduce_beam_poly(solid_angle_poly* poly, real* omega, rvec* centroid) {
@@ -446,7 +538,11 @@ real domega3(rvec v1, rvec v2, rvec v3) {
 
 int sort_helper(const void *a, const void *b) {
   if (((hydro_ray*)a)->face_id <  ((hydro_ray*)b)->face_id) return -1;
-  if (((hydro_ray*)a)->face_id == ((hydro_ray*)b)->face_id) return 0;
+  if (((hydro_ray*)a)->face_id == ((hydro_ray*)b)->face_id) {
+  	if (((hydro_ray*)a)->source_id <  ((hydro_ray*)b)->source_id) return -1;
+  	if (((hydro_ray*)a)->source_id == ((hydro_ray*)b)->source_id) return 0;
+  	if (((hydro_ray*)a)->source_id >  ((hydro_ray*)b)->source_id) return 1;
+  }
   if (((hydro_ray*)a)->face_id >  ((hydro_ray*)b)->face_id) return 1;
 }
 

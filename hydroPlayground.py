@@ -73,7 +73,7 @@ def _default_plots(self, fsz=8):
     if self.dim == 2:
         self.fig, ax = plt.subplots(1, 2, figsize=(2*fsz, fsz))
     if self.dim == 3:
-        self.fig, ax = plt.subplots(1, 4, figsize=(4*fsz, fsz))
+        self.fig, ax = plt.subplots(1, 3, figsize=(3*fsz, fsz))
     self.fig.subplots_adjust(wspace=0.5)
     if self.dim == 1:
         #if hasattr(self, 'fig'):
@@ -185,8 +185,6 @@ def _default_plots(self, fsz=8):
         #print "rhomin =", np.min(self.npverts['rho'])
         #print "rhomax =", np.max(self.npverts['rho'])
 
-        #cax = self.fig.add_axes([ax[1].get_position().x1+0.002, 0.21, 0.01, 0.58])
-        #self.fig.colorbar(imp, cax=cax)
 
         #ax[3].scatter(xmean[:,:,0], xmean[:,:,1], c=rho, s = 4, lw = 0)
         #ax[3].set_aspect('equal')
@@ -236,32 +234,24 @@ def _default_plots(self, fsz=8):
         #ax[3].set_title('radiation')
 
     if self.dim == 3:
-        imargs = {'interpolation': 'nearest', 'origin': 'lower'}
 
-        #if hasattr(self, 'fig'):
-            #ax = self.fig.get_axes()
-        #else:
-        #plt.show()
-
-        #ax[0].imshow(rho[:,:,32], **imargs)
-        #ax[0].set_ylabel(r'$y$')
-        #ax[0].set_xlabel(r'$x$')
-        #ax[0].set_title('rho')
-
-        #ax[1].imshow(vel[:,:,32], **imargs)
-        #ax[1].set_ylabel(r'$y$')
-        #ax[1].set_xlabel(r'$x$')
-        #ax[1].set_title('vel')
-
-        #ax[2].imshow(p[:,:,32], **imargs)
-        #ax[2].set_ylabel(r'$y$')
-        #ax[2].set_xlabel(r'$x$')
-        #ax[2].set_title('pressure')
         imargs = {'interpolation': 'nearest', 'origin': 'lower', 'extent': [0,1,0,1], 'cmap':
-                plt.cm.RdBu_r}
-        rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nx[2]/2]), **imargs)
-        rhorad = ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nx[1]/2,self.nghosts:-self.nghosts]), **imargs)
-        rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][(5*self.nx[0])/8,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+                plt.cm.RdBu_r, 'vmin': -8}
+
+        # check isotropy
+        ipts = np.mgrid[:self.nx[0],:self.nx[1],:self.nx[2]].T
+        r2 = self.dx*self.dx*((ipts[:,:,:,0]-self.nx[0]/2)**2+(ipts[:,:,:,1]-self.nx[1]/2)**2+(ipts[:,:,:,2]-self.nx[2]/2)**2)
+        iofrac = self.pygrid['x'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]
+        etot = self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]
+
+        #rhorad = ax[0].imshow(np.log10((etot*r2)[:,:,self.nx[2]/2-1]*(4*np.pi*1000)/self.dx), **imargs)
+        rhorad = ax[0].imshow(np.log10(etot[:,:,self.nx[2]/2-1]), **imargs)
+        cax = self.fig.add_axes([ax[0].get_position().x1+0.002, 0.21, 0.01, 0.58])
+        self.fig.colorbar(rhorad, cax=cax)
+        
+       
+        ax[1].imshow((self.pygrid['x'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nx[2]/2+1]), **imargs)
+
 
         #rhorad = ax[0].imshow(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,:],axis=0), **imargs)
         #rhorad = ax[1].imshow(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,:,self.nghosts:-self.nghosts],axis=1), **imargs)
@@ -275,67 +265,34 @@ def _default_plots(self, fsz=8):
         ax[0].set_xlabel(r'$x$')
         ax[0].set_xlim(0, 1)
         ax[0].set_ylim(0, 1)
-        ax[0].set_title('$\log{[E_\mathrm{rad}]}, z = 0$')
+        ax[0].set_title('$\log{[E_\mathrm{rad}]}$')
 
         ax[1].set_ylabel(r'$y$')
         ax[1].set_xlabel(r'$x$')
         ax[1].set_xlim(0, 1)
         ax[1].set_ylim(0, 1)
-        ax[1].set_title('$\log{[E_\mathrm{rad}]}, y = 0$')
-
-        ax[2].set_ylabel(r'$y$')
-        ax[2].set_xlabel(r'$x$')
-        ax[2].set_xlim(0, 1)
-        ax[2].set_ylim(0, 1)
-        ax[2].set_title('$\log{[E_\mathrm{rad}]}, x = 112 \Delta x$')
-
-
-        # check isotropy
-        ipts = np.mgrid[:self.nx[0],:self.nx[1],:self.nx[2]].T
-        r2 = self.dx*self.dx*((ipts[:,:,:,0]-self.nx[0]/2)**2+(ipts[:,:,:,1]-self.nx[1]/2)**2+(ipts[:,:,:,2]-self.nx[2]/2)**2)
-
-        #myr = np.linspace(np.min(r2)**0.5, np.max(r2)**0.5, 100)
-        #ax[3].plot(myr, 1.0*np.ones_like(myr), 'k--', label='$1/r$')
-
-
-        etot = self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]
-
-
-        print etot.shape, r2.shape, self.nx[0], self.nx[1], self.nx[2]
-        #print etot
-
-        ax[3].semilogy(1.0/self.dx*(r2.flatten())**0.5,
-                np.abs(1.0-etot.flatten()*r2.flatten()*(4*np.pi*1000)/self.dx),'r.', label='$E_\mathrm{rad}$', markersize=2)
-        #print np.mean(etot.flatten()*r2.flatten()*(4*np.pi*1000))
-        ax[3].set_ylim(0.0000001, 1.0)
-        ax[3].set_xlim(0.0, 32.0)
-
-        ax[3].set_xlabel(r'$r/\Delta x$')
-        ax[3].set_ylabel(r'$|\epsilon|$')
-        ax[3].set_title('$\epsilon = 1.0 - {E_\mathrm{rad} / (P_\mathrm{src}/(4 \pi r^2 c)})$')
-        #ax[3].set_aspect(.5)
-
-       
-        #ax[1].legend(loc='lower left')
-        #ax[1].set_xlabel(r'$r/\Delta x$')
-        #ax[1].set_ylabel(r'$|\epsilon|$')
-        #ax[1].set_title('$\epsilon = 1.0 - {E_\mathrm{rad} / (P_\mathrm{src}/(2 \pi r c)})$')
-        #ax[1].set_aspect(.5)
-
-        #print self.pyradgrid['E'][self.nx[0]/2,self.nx[1]/2] 
-        #print self.pyradgrid['E'][self.nx[0]/2-1,self.nx[1]/2-1] 
-        #print self.pyradgrid['E'][self.nx[0]/2+1,self.nx[1]/2+1] 
-        #print self.pyradgrid['E'][self.nx[0]/2+2,self.nx[1]/2+2] 
-
-        #print np.min(self.pyradgrid['E']), np.max(self.pyradgrid['E'])
+        ax[1].set_title('Ionized fraction')
 
 
 
+        print 'mean ionization fraction =', np.mean(iofrac)
+        rstrom = (3.0*np.mean(iofrac)/(4*np.pi))**(1./3.)
+        print 'rstrom =', rstrom
 
+        ax[2].plot(1.0*(r2.flatten())**0.5,
+                iofrac.flatten(),'r.', label='$E_\mathrm{rad}$', markersize=2)
+        #ax[2].semilogy(1.0*(r2.flatten())**0.5,
+                #etot.flatten()*r2.flatten()*(4*np.pi*1000)/self.dx,'k.', label='$E_\mathrm{rad}$', markersize=2)
 
-    #print 'delta cm [ %f , %f]' % (np.min(dcm), np.max(dcm))
+        #ax[2].semilogy([0, 0.5], [1, 1],'k--')
+        ax[2].plot([rstrom, rstrom], [-0.1, 1.1],'b--')
+        ax[2].set_ylim(-0.1, 1.1)
+        ax[2].set_xlim(0.0, 0.4)
+        ax[2].set_xlabel(r'$r$')
+        ax[2].set_ylabel(r'$x$')
+        ax[2].set_title('Ionized fraction $x(r)$')
+
     plt.show()
-    ax[-1].set_xlabel(r'$x$')
     self.fig.suptitle('%s, step = %d, t = %.03f' % (self.name, self.step, self.time))
 
 # parameters for a 1D problem with 256 grid cells
@@ -399,7 +356,8 @@ class HydroProblem(Structure):
         if self.verbose:
             print "\nSetting up the grid..."
         self.nghosts = 2 
-        self.dtype = np.dtype([('rho', np.float64), ('mom', np.float64, (3,)), ('com', np.float64, (3,)), ('etot', np.float64)]);
+        self.dtype = np.dtype([('rho', np.float64), ('mom', np.float64, (3,)), ('com', np.float64,
+            (3,)), ('etot', np.float64), ('x', np.float64), ('dN', np.float64)]);
         self.pygrid = np.ones(tuple(axsz+2*self.nghosts for axsz in self.nx[:self.dim]), dtype=self.dtype)
         tstr = tuple(np.cumprod(np.append(1,self.pygrid.shape))[:self.dim])
         self.strides = tstr
@@ -408,8 +366,7 @@ class HydroProblem(Structure):
         # setup the problem by calling the grid setup callback
         if self.verbose:
             print "\nSetting up the radiation field buffer..."
-        self.rdtype = np.dtype([('angle_id', np.int64), ('rmin', np.float64), ('rmax', np.float64), \
-            ('orcell', np.int32, (4,)), ('I', np.float64, 2),]) 
+        self.rdtype = np.dtype([('idbits', np.int64), ('r', np.float64), ('f', np.float64),]) 
         self.pyrad = np.zeros(16000000, dtype=self.rdtype)
         self.nrays = 0
 
