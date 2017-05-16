@@ -265,9 +265,9 @@ def _default_plots(self, fsz=8):
 
         #cax = self.fig.add_axes([ax[0].get_position().x1, 0.31, 0.01, 0.48])
         #self.fig.colorbar(rhorad, cax=cax)
-        rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,self.nx[2]/2]), **imargs)
-        rhorad = ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nx[1]/2,self.nghosts:-self.nghosts]), **imargs)
-        rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][(5*self.nx[0])/8,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+        rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,2]), **imargs)
+        rhorad = ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,2,self.nghosts:-self.nghosts]), **imargs)
+        rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][2,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
 
         #rhorad = ax[0].imshow(np.log10(np.sum(self.pyradgrid['E'][:,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts], axis=0)), **imargs)
         #rhorad = ax[1].imshow(np.log10(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,:,self.nghosts:-self.nghosts], axis=1)), **imargs)
@@ -298,7 +298,7 @@ def _default_plots(self, fsz=8):
 
         # check isotropy
         ipts = np.mgrid[:self.nx[0],:self.nx[1],:self.nx[2]].T
-        r2 = self.dx*self.dx*((ipts[:,:,:,0]-self.nx[0]/2)**2+(ipts[:,:,:,1]-self.nx[1]/2)**2+(ipts[:,:,:,2]-self.nx[2]/2)**2)
+        r2 = self.dx*self.dx*((ipts[:,:,:,0]+0.5)**2+(ipts[:,:,:,1]+0.5)**2+(ipts[:,:,:,2]+0.5)**2)
 
         #myr = np.linspace(np.min(r2)**0.5, np.max(r2)**0.5, 100)
         #ax[3].plot(myr, 1.0*np.ones_like(myr), 'k--', label='$1/r$')
@@ -405,7 +405,8 @@ class HydroProblem(Structure):
         if self.verbose:
             print "\nSetting up the grid..."
         self.nghosts = 2 
-        self.dtype = np.dtype([('rho', np.float64), ('mom', np.float64, (3,)), ('com', np.float64, (3,)), ('etot', np.float64)]);
+        self.dtype = np.dtype([('rho', np.float64), ('mom', np.float64, (3,)), ('com', np.float64,
+            (3,)), ('etot', np.float64), ('x', np.float64), ('dN', np.float64)])
         self.pygrid = np.ones(tuple(axsz+2*self.nghosts for axsz in self.nx[:self.dim]), dtype=self.dtype)
         tstr = tuple(np.cumprod(np.append(1,self.pygrid.shape))[:self.dim])
         self.strides = tstr

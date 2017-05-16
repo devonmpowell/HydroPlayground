@@ -7,7 +7,7 @@ sys.path.insert(0, '.')
 import hydroPlayground as hp
 
 # global stuff
-N = 32
+N = 64 
 L = 1.0
 dim = 3
 
@@ -15,17 +15,16 @@ dim = 3
 def init_grid(grid):
 
     # set the flat background field
-    grid['rho'] = 0.00001 
-    grid['mom'] = 0.0 
-    grid['etot'] = 1.0 
+    grid['rho'] = 2.94e1 # in 1.0e60 H/kpc
+    grid['x'] = 0.0 
 
     #grid['rho'][N/2-10+2:N/2+10+2,N/2+20:N/2+40] = 10
 
     # add some blobbiness
-    for sample in np.random.randint(0, high=N, size=(1000, dim)):
-        grid['rho'][tuple(sample)] = 10.0 
-    gaussian_filter(grid['rho'], 0.01*N, output=grid['rho'], mode='reflect')
-    gaussian_filter(grid['etot'], 0.01*N, output=grid['etot'], mode='reflect')
+    #for sample in np.random.randint(0, high=N, size=(1000, dim)):
+        #grid['rho'][tuple(sample)] = 10.0 
+    #gaussian_filter(grid['rho'], 0.01*N, output=grid['rho'], mode='reflect')
+    #gaussian_filter(grid['etot'], 0.01*N, output=grid['etot'], mode='reflect')
     
     # large internal energy at the center cell for a blast wave
     #grid['etot'][dim*(N/2,)] *= 1000

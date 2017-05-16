@@ -33,6 +33,7 @@
 #define BC_FREE 2
 
 #define TWO_PI 6.28318530718
+#define ERRTOL 1.0e-8 
 
 //#define flatind()
 
@@ -54,7 +55,8 @@ typedef struct {
 	rvec mom; // momentum
 	rvec com; // the first moment in position 
 	real etot; // total energy
-	// real x; // the ionization fraction
+	 real x; // the ionization fraction
+	 real dN; // the ionization rate 
 #ifdef RADIATION
 #endif
 } hydro_vector;
@@ -74,13 +76,12 @@ typedef struct {
 
 #define RAY_BASE_BITS(x) ((x)&((1<<hp->dim)-1))
 
-#define CLIGHT 1000.0
+#define CLIGHT 3.064 
 typedef struct {
 	long angle_id;
-	real rmin, rmax; // the inner and outer radius for the timestep 
-	//rvec origin; // the source location 
 	rvec origin; // the source location 
-	real Ftot, Fcom;	
+	real radius; // the radius from the source
+	real flux; 
 } hydro_ray;
 
 typedef struct {

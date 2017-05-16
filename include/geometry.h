@@ -44,7 +44,7 @@ typedef struct {
 } psi_face_buffer;
 
 
-void psi_voxels_init(psi_voxels* vox, psi_poly* poly, dvec* splitdir, hydro_problem* grid);
+void psi_voxels_init(psi_voxels* vox, psi_poly* poly, dvec splitdir, hydro_problem* grid);
 int psi_voxels_next(psi_voxels* vox, psi_poly* poly);
 
 //void psi_voxelize_tet(rvec* pos, rvec* vel, real mass, rvec* rbox, psi_dest_grid* dest_grid);

@@ -37,6 +37,7 @@ void psi_split_coord(psi_poly* inpoly, psi_poly* outpolys, real coord, int ax, i
 	memset(&side, 0, sizeof(side));
 	for(v = 0; v < *nverts; ++v) {
 		sdists[v] = coord - vertbuffer[v].pos.xyz[ax];
+		sdists[v] *= splitdir; 
 		if(sdists[v] < 0.0) {
 			side[v] = 1;
 			nright++;
@@ -316,7 +317,7 @@ void psi_init_tet(psi_poly* poly, rvec* pos) {
 	for(v = 0; v < PSI_NDIM+1; ++v) poly->verts[v].pos = pos[v];
 }
 
-void psi_voxels_init(psi_voxels* vox, psi_poly* poly, dvec* ldir, hydro_problem* grid) {
+void psi_voxels_init(psi_voxels* vox, psi_poly* poly, dvec ldir, hydro_problem* grid) {
 
 	int i, cliplo, cliphi, nplanes;
 	real cmin, cmax;
@@ -367,7 +368,7 @@ void psi_voxels_init(psi_voxels* vox, psi_poly* poly, dvec* ldir, hydro_problem*
 
 	// initialize the stack
 	vox->grid = grid;
-	vox->splitdir = *ldir;
+	vox->splitdir = ldir;
 	vox->stack[0] = *poly;
 	vox->nstack = 1;
 }
@@ -406,12 +407,18 @@ int psi_voxels_next(psi_voxels* vox, psi_poly* poly) {
 		stack[*nstack+1].ibox[0].ijk[spax] += dmax/2;
 		*nstack += 2;
 
+		//printf(" %d\n", vox->splitdir.ijk[spax]);
+
 		// TODO: This is a hack!
-		if(vox->splitdir.ijk[spax]) {
+		//if(vox->splitdir.ijk[spax] > 0) {
 			psi_poly tmp = stack[*nstack-1];
 			stack[*nstack-1] = stack[*nstack-2];
 			stack[*nstack-2] = tmp; 
-		}
+		//}
+		//else {
+		
+			////printf(".");
+		//}
 
 	}
 	return 0;
