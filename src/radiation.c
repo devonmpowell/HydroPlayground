@@ -49,7 +49,7 @@
 void update_radiation(real dt, hydro_problem* hp) {
 
 	int i, v, r, ax, rminbits, rmaxbits, fin, fout, ornrays, refine, baseid, reflvl, refbits,
-		flatind, quadrant, qid, rlvl, f, nbase, split;
+		flatind, quadrant, qid, rlvl, f, nbase, split, cell_good;
 	dvec lsgn, grind, nbox, loopind, locind;
 						dvec nextcell;
 	real ray_mom_out, fmom_in, domega_in, domega_out, intensity_in, dobase, flux_in, omega_out, 
@@ -73,7 +73,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 	}
 
 	real source_power = 1.577e2; // units of 10^60 photons per Myr
-	real cross_section = 6.62e-1; // units of 10^-60 kpc^2
+	real cross_section = 0;// 6.62e-1; // units of 10^-60 kpc^2
 	real alpha_b = 2.78e-4; // recombination rate
 
 	// STEP 1: source new rays 
@@ -81,8 +81,8 @@ void update_radiation(real dt, hydro_problem* hp) {
 		ray.radius = 0.0;
 		ray.flux = dt*source_power/nbase; 
 		for(i = 0; i < hp->dim; ++i) // TODO: source rays from their actual cells
-			ray.origin.xyz[i] = ERRTOL*hp->dx;// 0.5*hp->dx*(hp->nx.ijk[i]+1);
-			//ray.origin.xyz[i] = 0.5*hp->dx*(hp->nx.ijk[i]+1);
+			//ray.origin.xyz[i] = ERRTOL*hp->dx;// 0.5*hp->dx*(hp->nx.ijk[i]+1);
+			ray.origin.xyz[i] = 0.5*hp->dx*(hp->nx.ijk[i]+1);
 		ray.angle_id = ((r&0xFF)<<24); 
 		hp->rays[hp->nrays++] = ray;
 	}
@@ -110,9 +110,6 @@ void update_radiation(real dt, hydro_problem* hp) {
 		get_beam_poly(ray, r_old, r_new, &beam_poly, &nbox, &lsgn, hp);
 		unpack_id_bits(ray.angle_id, baseid, reflvl, refbits);
 		ray_omega = dobase/(1<<reflvl);               
-		if(baseid > 5) continue;
-		if(r_new > 5.0) continue;
-
 		if(beam_poly.ibox[0].i >= hp->nx.i) continue;
 		if(beam_poly.ibox[0].j >= hp->nx.j) continue;
 		if(beam_poly.ibox[0].k >= hp->nx.k) continue;
@@ -120,43 +117,216 @@ void update_radiation(real dt, hydro_problem* hp) {
 		if(beam_poly.ibox[1].j < 0) continue;
 		if(beam_poly.ibox[1].k < 0) continue;
 
-
-
 		int nfaces;
 		psi_face_buffer faces[16], face_in, face_out;
 		psi_voxels vox;
 		psi_poly curpoly;
 
-		// translate the poly to an integer offset
-		dvec offset = beam_poly.ibox[0]; 
-		rvec ortmp = ray.origin; 
-		for(ax = 0; ax < 3; ++ax) {
-			//offset.ijk[ax] = beam_poly.ibox[(1+lsgn.ijk[ax])/2].ijk[ax];
-			beam_poly.ibox[0].ijk[ax] -= offset.ijk[ax];
-			beam_poly.ibox[1].ijk[ax] -= offset.ijk[ax];
-			for(v = 0; v < beam_poly.nverts; ++v)
-				beam_poly.verts[v].pos.xyz[ax] -= hp->dx*offset.ijk[ax];
-			ortmp.xyz[ax] -= hp->dx*offset.ijk[ax];
-		}
+		// translate the poly to an integer offset 
+		// based on its "upper-left" corner
+		//dvec offset;
+		   //for(ax = 0; ax < 3; ++ax) // black magic logic
+			//offset.ijk[ax] = beam_poly.ibox[lsgn.ijk[ax]<0].ijk[ax]-2*(lsgn.ijk[ax]<0); 
+		//rvec ortmp = ray.origin; 
+		//for(ax = 0; ax < 3; ++ax) {
+			//beam_poly.ibox[0].ijk[ax] -= offset.ijk[ax];
+			//beam_poly.ibox[1].ijk[ax] -= offset.ijk[ax];
+			//for(v = 0; v < beam_poly.nverts; ++v)
+				//beam_poly.verts[v].pos.xyz[ax] -= hp->dx*offset.ijk[ax];
+			//ortmp.xyz[ax] -= hp->dx*offset.ijk[ax];
+		//}
 
 
-		// make planes for the beam poly and the voxel
-		// these will be useful for finding optical depths
-		rvec tmp0, tmp1;
+		//// make planes for the beam poly and the voxel
+		//// these will be useful for finding optical depths
+		//rvec tmp0, tmp1;
 		psi_plane cell_planes[8];
-		for(ax = 0; ax < 3; ++ax) {
-			tmp0.xyz[ax] = beam_poly.verts[4].pos.xyz[ax] - beam_poly.verts[3].pos.xyz[ax];
-			tmp1.xyz[ax] = beam_poly.verts[5].pos.xyz[ax] - beam_poly.verts[3].pos.xyz[ax];
-		}
-		cross3(cell_planes[BEAM_OUT].n, tmp0, tmp1);
-		cell_planes[BEAM_OUT].d = dot3(cell_planes[BEAM_OUT].n, beam_poly.verts[3].pos);
+		//for(ax = 0; ax < 3; ++ax) {
+			//tmp0.xyz[ax] = beam_poly.verts[4].pos.xyz[ax] - beam_poly.verts[3].pos.xyz[ax];
+			//tmp1.xyz[ax] = beam_poly.verts[5].pos.xyz[ax] - beam_poly.verts[3].pos.xyz[ax];
+		//}
+		//cross3(cell_planes[BEAM_OUT].n, tmp0, tmp1);
+		//cell_planes[BEAM_OUT].d = dot3(cell_planes[BEAM_OUT].n, beam_poly.verts[3].pos);
 
-		for(ax = 0; ax < 3; ++ax) {
-			tmp0.xyz[ax] = beam_poly.verts[1].pos.xyz[ax] - beam_poly.verts[0].pos.xyz[ax];
-			tmp1.xyz[ax] = beam_poly.verts[2].pos.xyz[ax] - beam_poly.verts[0].pos.xyz[ax];
+		//for(ax = 0; ax < 3; ++ax) {
+			//tmp0.xyz[ax] = beam_poly.verts[1].pos.xyz[ax] - beam_poly.verts[0].pos.xyz[ax];
+			//tmp1.xyz[ax] = beam_poly.verts[2].pos.xyz[ax] - beam_poly.verts[0].pos.xyz[ax];
+		//}
+		//cross3(cell_planes[BEAM_IN].n, tmp0, tmp1);
+		//cell_planes[BEAM_IN].d = dot3(cell_planes[BEAM_IN].n, beam_poly.verts[0].pos);
+
+#if 1
+
+		// voxelize the beam
+		ray_flux_out = 0.0;
+		struct {
+			real flux_in[8]; // TODO: Don't need this many indices
+		} transfer_info[nbox.i+1][nbox.j+1][nbox.k+1];
+		memset(transfer_info, 0, sizeof(transfer_info));
+		for(locind.i = 0; locind.i < nbox.i; ++locind.i)
+		for(locind.j = 0; locind.j < nbox.j; ++locind.j)
+		for(locind.k = 0; locind.k < nbox.k; ++locind.k) {
+
+			// get the relative and absolute grid indices
+			// make sure we're inside the grid bounds before processing
+			for(ax = 0; ax < 3; ++ax)
+				grind.ijk[ax] = lsgn.ijk[ax]*locind.ijk[ax] + 32;// offset.ijk[ax];
+			for(cell_good = 1, ax = 0; ax < hp->dim; ++ax)
+				if(grind.ijk[ax] < 0 || grind.ijk[ax] >= hp->nx.ijk[ax])
+					cell_good = 0;
+			flatind = flat_index(grind, hp);
+
+			if(cell_good)
+				hp->rad_grid[flatind].E += 1; 
+
+			printf(" ray %d, grid index %d %d %d\n", r, grind.i, grind.j, grind.k);
+
+			continue;
+
+			// process the solid angle intersections of the faces
+			// first, translate the voxel into coordinates centered on the ray source
+			int nflag = 0;
+			for(v = 0; v < curpoly.nverts; ++v) {
+				nflag += curpoly.verts[v].flags;
+				for(ax = 0; ax < hp->dim; ++ax)
+					curpoly.verts[v].pos.xyz[ax] -= ray.origin.xyz[ax];
+			}
+			if(r_old == 0.0 && nflag == 3) {
+				// TODO: better subgrid model!!
+				transfer_info[locind.i+1][locind.j][locind.k].flux_in[0] = ray.flux;
+				transfer_info[locind.i][locind.j+1][locind.k].flux_in[2] = ray.flux;
+				transfer_info[locind.i][locind.j][locind.k+1].flux_in[4] = ray.flux;
+				continue;
+			}
+
+			psi_poly poly_in, poly_out;
+			real omega_in, omega_in_tot, omega_out_tot;
+
+			omega_in_tot = 0.0;
+			omega_out_tot = 0.0;
+
+			// Extract all upwind/downwind faces from the poly
+			// Filter out all degenerate edges
+
+			// normalize the face vertices to be like ray normals
+			rvec cvert;
+			for(v = 0; v < curpoly.nverts; ++v) {
+				cvert = curpoly.verts[v].pos;
+				len = sqrt(cvert.x*cvert.x+cvert.y*cvert.y+cvert.z*cvert.z);
+				for(ax = 0; ax < hp->dim; ++ax)
+					curpoly.verts[v].pos.xyz[ax] /= len;
+			}
+			psi_extract_faces(&curpoly, faces, &nfaces);
+			rvec cliptmp;
+			int ornf = nfaces;
+			nfaces = 0;
+			for(fin = 0; fin < ornf; ++fin) {
+				face_in = faces[fin];
+				int ornv = face_in.nverts;
+				face_in.nverts = 0;
+				rvec pvert = face_in.verts[ornv-1];
+				for(v = 0; v < ornv; ++v) {
+					cvert = face_in.verts[v];
+					cross3(cliptmp, cvert, pvert); 
+					len = sqrt(cliptmp.x*cliptmp.x + cliptmp.y*cliptmp.y + cliptmp.z*cliptmp.z);
+					if(len*r_new > ERRTOL*hp->dx)  { // TODO: better tolerance
+						face_in.verts[face_in.nverts++] = cvert;
+						pvert = cvert;
+					}
+				}
+				if(face_in.nverts >= hp->dim) 
+					faces[nfaces++] = face_in;
+			}
+
+
+			real domega;
+			rvec centroid;
+
+			real omega_x = 0.0;
+
+			real flux_in_tot = 0.0;
+			real flux_out_tot = 0.0;
+
+
+			for(fin = 0; fin < nfaces; ++fin) {
+				face_in = faces[fin];
+				if(face_in.face_id%2 != 0) continue;
+
+				// copy the input poly into a new poly struct for clipping
+				// get its solid angle as viewed from the source
+				poly_in.nverts = face_in.nverts;
+				for(v = 0; v < face_in.nverts; ++v) {
+					poly_in.verts[v].pos = face_in.verts[v];
+					poly_in.verts[v].pnbrs[0] = (v + face_in.nverts - 1)%face_in.nverts; 
+					poly_in.verts[v].pnbrs[1] = (v + 1)%face_in.nverts; 
+				}
+				reduce_beam_poly(&poly_in, &omega_in);
+				if(omega_in < ERRTOL*ray_omega) continue;
+
+				// get the incoming beam front (TODO: do this ahead of time??)
+				if(face_in.face_id == BEAM_IN)
+				   flux_in = ray.flux*omega_in/ray_omega;
+				else
+					flux_in = transfer_info[locind.i][locind.j][locind.k].flux_in[face_in.face_id];
+				if(flux_in <= 0.0) continue;
+				intensity_in = flux_in/omega_in;
+
+				real omega_out_tot = 0.0;
+				for(fout = 0; fout < nfaces; ++fout) {
+					face_out = faces[fout];
+					if(face_out.face_id%2 == 0) continue;
+
+
+
+					// TODO: make these clip planes ahead of time
+					psi_plane clip_out[16];
+					memset(clip_out, 0, sizeof(clip_out));
+					int nclip = 0; 
+					rvec pvert = face_out.verts[0];
+					rvec cvert;
+					for(v = 1; v < face_out.nverts+1; ++v) {
+						cvert = face_out.verts[v%face_out.nverts];
+						cross3(cliptmp, cvert, pvert); 
+						clip_out[nclip++].n = cliptmp;
+						pvert = cvert;
+					}
+
+					poly_out = poly_in;
+					clip_beam_poly(&poly_out, clip_out, nclip, hp); 
+					reduce_beam_poly_deluxe(&poly_out, locind, ray.origin, face_in.face_id, face_out.face_id, cell_planes[BEAM_IN], cell_planes[BEAM_OUT], &omega_out, &dr, hp);
+					if(omega_out < ERRTOL*omega_in) continue;
+
+					flux_in = intensity_in*omega_out;
+					flux_out = flux_in;
+					if(cell_good)
+						flux_out *= exp(-cross_section*(1.0-hp->grid[flatind].x)*hp->grid[flatind].rho*dr);
+
+					if(face_out.face_id == BEAM_OUT)
+						ray_flux_out += flux_out; 
+					else {
+						memset(&nextcell, 0, sizeof(nextcell));
+						nextcell.ijk[face_out.face_id/2] = 1;
+						transfer_info[locind.i+nextcell.i][locind.j+nextcell.j][locind.k+nextcell.k].flux_in[face_out.face_id^1] += flux_out; 
+					}
+
+					omega_out_tot += omega_out;
+					if(cell_good) {
+						hp->rad_grid[flatind].E += 0.5*(flux_in+flux_out)*dr/((r_new-r_old)*(hp->dx*hp->dx)); 
+						hp->grid[flatind].dN += flux_in-flux_out; 
+					}
+				}
+
+				// TODO: fix this check!
+				//err = fabs(1.0 - omega_out_tot/omega_in);
+				//if(err > ERRTOL) {
+					//printf("Incorrect solid angle!  face_in = %d, Omega_in = %.5e, omega_out_tot = %.5e, err = %.5e\n", face_in.face_id, omega_in, omega_out_tot, err);
+					//exit(0);
+				//}
+			}
 		}
-		cross3(cell_planes[BEAM_IN].n, tmp0, tmp1);
-		cell_planes[BEAM_IN].d = dot3(cell_planes[BEAM_IN].n, beam_poly.verts[0].pos);
+
+
+#else
 
 
 		// voxelize the beam
@@ -321,6 +491,7 @@ void update_radiation(real dt, hydro_problem* hp) {
 				//}
 			}
 		}
+#endif
 
 		//err = fabs(1.0 - ray_flux_out/ray.flux);
 		//if(err > 1.0e-12) {

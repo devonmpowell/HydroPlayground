@@ -265,13 +265,13 @@ def _default_plots(self, fsz=8):
 
         #cax = self.fig.add_axes([ax[0].get_position().x1, 0.31, 0.01, 0.48])
         #self.fig.colorbar(rhorad, cax=cax)
-        rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,2]), **imargs)
-        rhorad = ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,2,self.nghosts:-self.nghosts]), **imargs)
-        rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][2,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
+        #rhorad = ax[0].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,33]), **imargs)
+        #rhorad = ax[1].imshow(np.log10(self.pyradgrid['E'][self.nghosts:-self.nghosts,33,self.nghosts:-self.nghosts]), **imargs)
+        #rhorad = ax[2].imshow(np.log10(self.pyradgrid['E'][33,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts]), **imargs)
 
-        #rhorad = ax[0].imshow(np.log10(np.sum(self.pyradgrid['E'][:,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts], axis=0)), **imargs)
-        #rhorad = ax[1].imshow(np.log10(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,:,self.nghosts:-self.nghosts], axis=1)), **imargs)
-        #rhorad = ax[2].imshow(np.log10(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,:], axis=2)), **imargs)
+        rhorad = ax[0].imshow(np.log10(np.sum(self.pyradgrid['E'][:,self.nghosts:-self.nghosts,self.nghosts:-self.nghosts], axis=0)), **imargs)
+        rhorad = ax[1].imshow(np.log10(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,:,self.nghosts:-self.nghosts], axis=1)), **imargs)
+        rhorad = ax[2].imshow(np.log10(np.sum(self.pyradgrid['E'][self.nghosts:-self.nghosts,self.nghosts:-self.nghosts,:], axis=2)), **imargs)
 
 
         #ax[1].imshow(vel, **imargs)
